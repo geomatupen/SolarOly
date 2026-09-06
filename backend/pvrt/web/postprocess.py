@@ -15,6 +15,8 @@ from typing import Any, Callable, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from shapely.geometry import mapping
+from shapely.ops import unary_union
 
 from ..postprocess import (
     analyze_geojson,
@@ -80,7 +82,7 @@ class OverlapDeduplicateAnomaliesRequest(BaseModel):
     input_path: str
     output_name: str = "anomaly_postprocess"
     workflow_id: str | None = None
-    minimum_overlap_percent: float = Field(default=60.0, gt=0.0, le=100.0)
+    minimum_overlap_percent: float = Field(default=20.0, gt=0.0, le=100.0)
 
 
 class NeighborImageStatsRequest(BaseModel):
@@ -141,6 +143,10 @@ class ShareLayerRequest(BaseModel):
 class EditLayerRequest(BaseModel):
     geojson: dict[str, Any]
     name: str | None = Field(default=None, max_length=80)
+
+
+class DissolvePolygonsRequest(BaseModel):
+    geojson: dict[str, Any]
 
 
 class EditSourceRequest(BaseModel):
@@ -1710,6 +1716,49 @@ def create_postprocess_router(
                 "overlay_id": overlay_id,
                 "path": media_url(source),
                 "reference": True,
+            },
+        }
+
+    @router.post("/{result_id}/postprocess/dissolve")
+    async def dissolve_polygons(
+        result_id: str,
+        request: DissolvePolygonsRequest,
+    ) -> dict[str, Any]:
+        resolve_result(result_id)
+        geojson = request.geojson
+        features = geojson.get("features") if isinstance(geojson, dict) else None
+        if not isinstance(geojson, dict) or geojson.get("type") != "FeatureCollection" or not isinstance(features, list):
+            raise HTTPException(status_code=400, detail="Selected data must be a GeoJSON FeatureCollection.")
+        if len(features) < 2:
+            raise HTTPException(status_code=400, detail="Select at least two polygons to dissolve.")
+        if len(features) > 10_000:
+            raise HTTPException(status_code=400, detail="Too many polygons were selected for one dissolve operation.")
+        geometries = []
+        for index, item in enumerate(features):
+            geometry = polygonal_geometry(item) if isinstance(item, dict) else None
+            if geometry is None or geometry.is_empty or geometry.area <= 0:
+                raise HTTPException(status_code=400, detail=f"Selected feature {index + 1} is not a valid polygon.")
+            geometries.append(geometry)
+        try:
+            dissolved = unary_union(geometries)
+            dissolved = polygonal_geometry({"geometry": mapping(dissolved)})
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="The selected polygons could not be dissolved.") from exc
+        if dissolved is None or dissolved.is_empty:
+            raise HTTPException(status_code=400, detail="The selected polygons did not produce a polygon result.")
+        first = features[0]
+        properties = dict(first.get("properties") or {})
+        properties.pop("manually_merged", None)
+        properties.update({
+            "manually_dissolved": True,
+            "dissolved_feature_count": len(features),
+        })
+        return {
+            "ok": True,
+            "feature": {
+                "type": "Feature",
+                "geometry": mapping(dissolved),
+                "properties": properties,
             },
         }
 

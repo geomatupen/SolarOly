@@ -754,7 +754,7 @@ body.postprocessFullscreenOpen { overflow: hidden; }
 }
 .leaflet-tooltip.postprocessFeatureLabel::before { display: none; }
 
-.postprocessMap.mergeMode .leaflet-interactive { cursor: cell; }
+.postprocessMap.dissolveMode .leaflet-interactive { cursor: cell; }
 
 .solarPanelIdTooltip,
 .leaflet-tooltip.solarRowIdTooltip {

@@ -2016,6 +2016,7 @@
       try { layer.pm?.disableLayerDrag?.(); } catch (_) {}
       try { layer.pm?.disableRotate?.(); } catch (_) {}
       layer.off("pm:edit", scheduleEditHistory);
+      layer.off("pm:change", scheduleEditHistory);
       layer.off("pm:dragend", recordEditState);
       layer.off("pm:rotateend", recordEditState);
       layer.off("pm:markerdragend", recordEditState);
@@ -2026,12 +2027,12 @@
     byId("ppMap").classList.remove("vertexMode");
     byId("ppMap").classList.remove("moveMode");
     byId("ppMap").classList.remove("rotateMode");
-    byId("ppMap").classList.remove("mergeMode");
+    byId("ppMap").classList.remove("dissolveMode");
     byId("ppEditVertices").classList.remove("active");
     byId("ppMovePolygons").classList.remove("active");
     byId("ppRotatePolygons").classList.remove("active");
-    byId("ppMergePolygons").classList.remove("active");
-    setIconButtonLabel("ppMergePolygons", "Merge polygons");
+    byId("ppDissolvePolygons").classList.remove("active");
+    setIconButtonLabel("ppDissolvePolygons", "Dissolve polygons");
     byId("ppDeletePolygons").classList.remove("active");
     applyEditingEmphasis();
   }
@@ -2101,12 +2102,13 @@
       if (layer.pm?.enable) {
         supported = true;
         const handler = event => {
-          if (event.originalEvent) window.L.DomEvent.stopPropagation(event.originalEvent);
+          if (event.originalEvent) window.L.DomEvent.stop(event.originalEvent);
           const selectedLayer = selectOverlappingPolygon(state.editing.item.layer, layer, event.latlng);
           state.editing.item.layer.eachLayer(other => {
             if (other !== selectedLayer) {
               try { other.pm?.disable(); } catch (_) {}
               other.off("pm:edit", scheduleEditHistory);
+              other.off("pm:change", scheduleEditHistory);
               other.off("pm:markerdragend", recordEditState);
               other.off("pm:vertexadded", scheduleEditHistory);
               other.off("pm:vertexremoved", scheduleEditHistory);
@@ -2116,14 +2118,21 @@
           state.editing.selectedLayer = selectedLayer;
           selectedLayer.setStyle?.({ color: "#ffffff", weight: state.editing.item.baseStyle.weight + 2, fillOpacity: 0.42 });
           selectedLayer.on("pm:edit", scheduleEditHistory);
+          selectedLayer.on("pm:change", scheduleEditHistory);
           selectedLayer.on("pm:markerdragend", recordEditState);
           selectedLayer.on("pm:vertexadded", scheduleEditHistory);
           selectedLayer.on("pm:vertexremoved", scheduleEditHistory);
-          selectedLayer.pm.enable({ allowSelfIntersection: false, snappable: true });
-          const markerCount = selectedLayer.pm?._markers?.length || 0;
-          byId("ppEditStatus").textContent = markerCount
-            ? `Polygon selected · ${markerCount} vertex handles. Drag a handle to edit.`
-            : "Polygon selected, but vertex handles could not be created.";
+          byId("ppEditStatus").textContent = "Polygon selected · loading vertex handles…";
+          window.requestAnimationFrame(() => {
+            if (state.editing?.mode !== "vertices" || state.editing.selectedLayer !== selectedLayer) return;
+            selectedLayer.pm.enable({ allowSelfIntersection: false, snappable: true });
+            const markerCount = selectedLayer.pm?._markers?.flat?.(Infinity)?.length
+              || selectedLayer.pm?._markers?.length
+              || 0;
+            byId("ppEditStatus").textContent = markerCount
+              ? `Polygon selected · ${markerCount} vertex handles. Drag a handle to edit.`
+              : "Polygon selected, but vertex handles could not be created.";
+          });
         };
         layer.on("click", handler);
         state.editing.deleteHandlers.push({ layer, handler });
@@ -2224,39 +2233,56 @@
       : "Polygon rotation support did not load; refresh the page and try again.";
   }
 
-  function enablePolygonMerging() {
+  async function enablePolygonDissolving() {
     if (!state.editing) return;
-    const existingSelection = state.editing.mode === "merge"
-      ? [...(state.editing.mergeSelection || [])]
+    const existingSelection = state.editing.mode === "dissolve"
+      ? [...(state.editing.dissolveSelection || [])]
       : [];
+    let dissolvedCount = 0;
     if (existingSelection.length >= 2) {
       const editing = state.editing;
-      const polygons = [];
-      const firstFeature = JSON.parse(JSON.stringify(existingSelection[0].toGeoJSON()));
-      for (const layer of existingSelection) {
-        const geometry = layer.toGeoJSON()?.geometry;
-        if (geometry?.type === "Polygon") polygons.push(geometry.coordinates);
-        else if (geometry?.type === "MultiPolygon") polygons.push(...geometry.coordinates);
-        editing.item.layer.removeLayer(layer);
+      const button = byId("ppDissolvePolygons");
+      button.disabled = true;
+      byId("ppEditStatus").textContent = `Dissolving ${existingSelection.length} selected polygons…`;
+      try {
+        const payload = await requestJson(
+          `/api/results/${encodeURIComponent(byId("ppResult").value)}/postprocess/dissolve`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              geojson: {
+                type: "FeatureCollection",
+                features: existingSelection.map(layer => layer.toGeoJSON()),
+              },
+            }),
+          },
+        );
+        if (state.editing !== editing) return;
+        for (const layer of existingSelection) editing.item.layer.removeLayer(layer);
+        const created = createPreviewGeoJsonLayer(editing.stage, {
+          type: "FeatureCollection",
+          features: [payload.feature],
+        });
+        created.layer.eachLayer(layer => editing.item.layer.addLayer(layer));
+        editing.item.count = editing.item.layer.getLayers().length;
+        dissolvedCount = existingSelection.length;
+        recordEditState(`${dissolvedCount} polygons dissolved. You can undo or redo this change.`);
+      } catch (error) {
+        byId("ppEditStatus").textContent = error.message;
+        return;
+      } finally {
+        button.disabled = false;
       }
-      firstFeature.geometry = { type: "MultiPolygon", coordinates: polygons };
-      firstFeature.properties = { ...(firstFeature.properties || {}), manually_merged: true };
-      const merged = window.L.geoJSON(firstFeature, {
-        pmIgnore: false,
-        style: editing.item.baseStyle,
-      });
-      merged.eachLayer(layer => editing.item.layer.addLayer(layer));
-      editing.item.count = editing.item.layer.getLayers().length;
-      recordEditState(`${existingSelection.length} polygons merged. You can undo or redo this change.`);
     }
     disableEditingTools();
-    state.editing.mode = "merge";
-    state.editing.mergeSelection = new Set();
+    state.editing.mode = "dissolve";
+    state.editing.dissolveSelection = new Set();
     state.editing.item.layer.eachLayer(layer => {
       const handler = event => {
         if (event.originalEvent) window.L.DomEvent.stopPropagation(event.originalEvent);
         const selectedLayer = selectOverlappingPolygon(state.editing.item.layer, layer, event.latlng);
-        const selected = state.editing.mergeSelection;
+        const selected = state.editing.dissolveSelection;
         if (selected.has(selectedLayer)) {
           selected.delete(selectedLayer);
           selectedLayer.setStyle?.(state.editing.item.baseStyle);
@@ -2264,18 +2290,20 @@
           selected.add(selectedLayer);
           selectedLayer.setStyle?.({ color: "#ffffff", weight: state.editing.item.baseStyle.weight + 2, fillOpacity: 0.48 });
         }
-        setIconButtonLabel("ppMergePolygons", selected.size >= 2 ? `Merge selected (${selected.size})` : "Merge polygons");
+        setIconButtonLabel("ppDissolvePolygons", selected.size >= 2 ? `Dissolve selected (${selected.size})` : "Dissolve polygons");
         byId("ppEditStatus").textContent = selected.size >= 2
-          ? "Click Merge selected to combine the highlighted polygons into one feature."
-          : `Merge mode: select at least two polygons (${selected.size} selected).`;
+          ? "Click Dissolve selected to union the highlighted polygons into one feature."
+          : `Dissolve mode: select at least two polygons (${selected.size} selected).`;
       };
       layer.on("click", handler);
       state.editing.deleteHandlers.push({ layer, handler });
     });
-    byId("ppMap").classList.add("mergeMode");
-    byId("ppMergePolygons").classList.add("active");
-    setIconButtonLabel("ppMergePolygons", "Merge polygons");
-    byId("ppEditStatus").textContent = "Merge mode: select at least two polygons, then click Merge polygons again.";
+    byId("ppMap").classList.add("dissolveMode");
+    byId("ppDissolvePolygons").classList.add("active");
+    setIconButtonLabel("ppDissolvePolygons", "Dissolve polygons");
+    byId("ppEditStatus").textContent = dissolvedCount
+      ? `${dissolvedCount} polygons dissolved. Select more polygons to dissolve, or save the layer.`
+      : "Dissolve mode: select at least two polygons, then click Dissolve polygons again.";
   }
 
   function restoreEditHistory(targetIndex) {
@@ -2302,7 +2330,7 @@
     applyEditingEmphasis();
     renderPreviewLayers();
     if (mode === "delete") enablePolygonDeletion();
-    else if (mode === "merge") enablePolygonMerging();
+    else if (mode === "dissolve") void enablePolygonDissolving();
     else if (mode === "move") enablePolygonMovement();
     else if (mode === "rotate") enablePolygonRotation();
     else enableVertexEditing();
@@ -3412,7 +3440,7 @@
     byId("ppEditVertices").addEventListener("click", enableVertexEditing);
     byId("ppMovePolygons").addEventListener("click", enablePolygonMovement);
     byId("ppRotatePolygons").addEventListener("click", enablePolygonRotation);
-    byId("ppMergePolygons").addEventListener("click", enablePolygonMerging);
+    byId("ppDissolvePolygons").addEventListener("click", () => void enablePolygonDissolving());
     byId("ppDeletePolygons").addEventListener("click", enablePolygonDeletion);
     byId("ppUndoEdits").addEventListener("click", undoEdits);
     byId("ppRedoEdits").addEventListener("click", redoEdits);

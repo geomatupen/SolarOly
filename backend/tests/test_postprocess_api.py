@@ -6,9 +6,11 @@ import unittest
 from pathlib import Path
 
 from fastapi import HTTPException
+from shapely.geometry import shape
 
 from pvrt.web.postprocess import create_postprocess_router
 from pvrt.web.postprocess import AssociateAnomaliesRequest
+from pvrt.web.postprocess import DissolvePolygonsRequest
 from pvrt.web.postprocess import EditLayerRequest
 from pvrt.web.postprocess import EditSourceRequest
 from pvrt.web.postprocess import OverlapDeduplicateAnomaliesRequest
@@ -17,6 +19,51 @@ from pvrt.web.postprocess import VisualReviewDecisionRequest
 
 
 class PostprocessApiTests(unittest.TestCase):
+    def test_anomaly_overlap_default_is_twenty_percent(self):
+        request = OverlapDeduplicateAnomaliesRequest(input_path="anomalies.geojson")
+        self.assertEqual(request.minimum_overlap_percent, 20.0)
+
+    def test_dissolve_unions_selected_polygons(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sessions = root / "sessions"
+            overlays = root / "overlays"
+            (sessions / "test-result").mkdir(parents=True)
+            overlays.mkdir()
+            router = create_postprocess_router(
+                lambda: sessions,
+                lambda: overlays,
+                lambda path: f"/media/{path.name}",
+            )
+            route = next(
+                item for item in router.routes
+                if item.path == "/api/results/{result_id}/postprocess/dissolve"
+                and "POST" in item.methods
+            )
+            result = asyncio.run(route.endpoint(
+                "test-result",
+                DissolvePolygonsRequest(geojson={
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [2, 0], [2, 1], [0, 1], [0, 0]]]},
+                            "properties": {"name": "first"},
+                        },
+                        {
+                            "type": "Feature",
+                            "geometry": {"type": "Polygon", "coordinates": [[[1, 0], [3, 0], [3, 1], [1, 1], [1, 0]]]},
+                            "properties": {"name": "second"},
+                        },
+                    ],
+                }),
+            ))
+            self.assertEqual(result["feature"]["geometry"]["type"], "Polygon")
+            self.assertAlmostEqual(shape(result["feature"]["geometry"]).area, 3.0)
+            self.assertEqual(result["feature"]["properties"]["name"], "first")
+            self.assertTrue(result["feature"]["properties"]["manually_dissolved"])
+            self.assertEqual(result["feature"]["properties"]["dissolved_feature_count"], 2)
+
     def test_association_accepts_segmentation_layer_with_unidentified_panels(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
