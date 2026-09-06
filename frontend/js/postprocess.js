@@ -2031,8 +2031,8 @@
     byId("ppEditVertices").classList.remove("active");
     byId("ppMovePolygons").classList.remove("active");
     byId("ppRotatePolygons").classList.remove("active");
-    byId("ppDissolvePolygons").classList.remove("active");
-    setIconButtonLabel("ppDissolvePolygons", "Dissolve polygons");
+    byId("ppMergePolygons").classList.remove("active");
+    setIconButtonLabel("ppMergePolygons", "Dissolve polygons");
     byId("ppDeletePolygons").classList.remove("active");
     applyEditingEmphasis();
   }
@@ -2241,7 +2241,7 @@
     let dissolvedCount = 0;
     if (existingSelection.length >= 2) {
       const editing = state.editing;
-      const button = byId("ppDissolvePolygons");
+      const button = byId("ppMergePolygons");
       button.disabled = true;
       byId("ppEditStatus").textContent = `Dissolving ${existingSelection.length} selected polygons…`;
       try {
@@ -2290,7 +2290,7 @@
           selected.add(selectedLayer);
           selectedLayer.setStyle?.({ color: "#ffffff", weight: state.editing.item.baseStyle.weight + 2, fillOpacity: 0.48 });
         }
-        setIconButtonLabel("ppDissolvePolygons", selected.size >= 2 ? `Dissolve selected (${selected.size})` : "Dissolve polygons");
+        setIconButtonLabel("ppMergePolygons", selected.size >= 2 ? `Dissolve selected (${selected.size})` : "Dissolve polygons");
         byId("ppEditStatus").textContent = selected.size >= 2
           ? "Click Dissolve selected to union the highlighted polygons into one feature."
           : `Dissolve mode: select at least two polygons (${selected.size} selected).`;
@@ -2299,8 +2299,8 @@
       state.editing.deleteHandlers.push({ layer, handler });
     });
     byId("ppMap").classList.add("dissolveMode");
-    byId("ppDissolvePolygons").classList.add("active");
-    setIconButtonLabel("ppDissolvePolygons", "Dissolve polygons");
+    byId("ppMergePolygons").classList.add("active");
+    setIconButtonLabel("ppMergePolygons", "Dissolve polygons");
     byId("ppEditStatus").textContent = dissolvedCount
       ? `${dissolvedCount} polygons dissolved. Select more polygons to dissolve, or save the layer.`
       : "Dissolve mode: select at least two polygons, then click Dissolve polygons again.";
@@ -3440,7 +3440,7 @@
     byId("ppEditVertices").addEventListener("click", enableVertexEditing);
     byId("ppMovePolygons").addEventListener("click", enablePolygonMovement);
     byId("ppRotatePolygons").addEventListener("click", enablePolygonRotation);
-    byId("ppDissolvePolygons").addEventListener("click", () => void enablePolygonDissolving());
+    byId("ppMergePolygons").addEventListener("click", () => void enablePolygonDissolving());
     byId("ppDeletePolygons").addEventListener("click", enablePolygonDeletion);
     byId("ppUndoEdits").addEventListener("click", undoEdits);
     byId("ppRedoEdits").addEventListener("click", redoEdits);
@@ -3508,7 +3508,7 @@
   async function activate() {
     init();
     if (state.currentJobId && state.currentJob) return;
-    await loadJobs(false);
+    await loadJobs(true);
   }
 
   async function loadJobs(force = false) {
@@ -4365,7 +4365,7 @@
     byId("ppCreateDemoExport").hidden = true;
     byId("ppDemoExportPath").hidden = true;
     byId("ppDemoExportPath").textContent = "";
-    void loadJobs();
+    void loadJobs(true);
   }
 
   function getContext() {
