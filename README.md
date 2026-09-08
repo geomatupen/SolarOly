@@ -295,5 +295,6 @@ matching. If you use SolarOly's alignment workflow in research, please cite
 *LightGlue: Local Feature Matching at Light Speed*, ICCV 2023. The complete
 BibTeX entry is provided in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Special thanks to Termatics, Austria, for providing the opportunity and support
-to develop this project.
+SolarOly was developed with support from
+[Termatics](https://www.termatics.com/), an Austria-based company which works
+on advanced thermography and thermal analytics.
