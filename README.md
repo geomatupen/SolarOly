@@ -5,11 +5,8 @@ training and running segmentation or anomaly-detection models, reviewing
 GeoJSON results on a map, and producing isolated post-processing outputs.
 
 The FastAPI backend and browser frontend support DJI radiometric thermal
-imagery, orthophotos, Detectron2, Ultralytics YOLO, SIFT + LightGlue image
-alignment, approximate mosaics, and panel/anomaly post-processing.
-
-> SolarOly is under active development. Back up project folders before an
-> upgrade and validate generated geospatial results before operational use.
+imagery, orthophotos, Detectron2, Ultralytics YOLO, LightGlue image alignment,
+approximate mosaics, and panel/anomaly post-processing.
 
 ## Features
 
@@ -207,8 +204,8 @@ The following tutorial videos show how to run main workflows in SolarOly:
    predictions in the Results and Map tabs.
 3. **[Testing Models with Advanced Options](https://youtu.be/AUtzEsTwp3M)** —
    Correct lens distortion, refine individual-image position and orientation
-   with LightGlue, or create a tiled approximate mosaic before inference. (only for  
-   individual images input)
+   with LightGlue, or create a tiled approximate mosaic for inference or map
+   review. These options apply to individual-image inputs.
 4. **[Post Processing](https://youtu.be/R51QyKXfUsc)** — Merge tile-split solar
    panel fragments, edit and regularize panel shapes, remove duplicate anomalies
    from overlapping images, and assign anomalies to panels and rows.
@@ -263,8 +260,8 @@ for the training backend you intend to use:
   class definitions used to validate the YOLO sidecars.
 
 Project folders contain source imagery and generated artifacts and are not part
-of the application source. Back up project roots before upgrades. Do not commit
-datasets, credentials, customer imagery or model weights to the repository.
+of the application source. Do not commit datasets, credentials, customer
+imagery or model weights to the repository.
 
 ## Troubleshooting
 
@@ -276,7 +273,7 @@ datasets, credentials, customer imagery or model weights to the repository.
 - **Model weights are missing:** place compatible `.pth` or `.pt` files in a
   project training output and select them in the UI.
 - **LightGlue cannot load:** the first use may need network access to download
-  its pretrained SIFT matcher checkpoint.
+  its pretrained matcher checkpoint.
 - **DJI thermal decoding fails:** verify `DIRP_SDK_PATH`,
   `LD_LIBRARY_PATH`, host architecture, vendor runtime companion libraries and
   that `PVRT_ENABLE_THERMAL=1` was set before startup.
