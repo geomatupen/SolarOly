@@ -36,6 +36,7 @@
     currentJobId: null,
     currentJob: null,
     jobs: [],
+    jobsLoadInfo: null,
     jobsLoaded: false,
     jobsLoadingPromise: null,
     modeCache: new Map(),
@@ -3534,20 +3535,30 @@
     list.replaceChildren();
     const loading = document.createElement("div");
     loading.className = "mapListLoading";
-    loading.innerHTML = '<span class="spinner" aria-hidden="true"></span><span>Loading jobs…</span>';
+    const requestedProjectId = new URLSearchParams(window.location.search).get("projectId") || "";
+    loading.innerHTML = `<span class="spinner" aria-hidden="true"></span><span>Loading jobs${requestedProjectId ? ` for project ${escapeHtml(requestedProjectId)}` : ""}…</span>`;
+    list.setAttribute("aria-busy", "true");
     list.appendChild(loading);
     state.jobsLoadingPromise = (async () => {
       try {
-        const payload = await requestJson("/api/postprocess-jobs", { cache: "no-store" });
+        const jobsUrl = `/api/postprocess-jobs${requestedProjectId ? `?project_id=${encodeURIComponent(requestedProjectId)}` : ""}`;
+        const payload = await requestJson(jobsUrl, { cache: "no-store" });
         state.jobs = payload.jobs || [];
+        state.jobsLoadInfo = {
+          projectId: payload.project_id || requestedProjectId,
+          scanned: Number(payload.scanned_job_folders || 0),
+          skipped: Array.isArray(payload.skipped_job_ids) ? payload.skipped_job_ids : [],
+        };
         state.jobsLoaded = true;
         renderJobList();
       } catch (error) {
         state.jobs = [];
+        state.jobsLoadInfo = null;
         state.jobsLoaded = false;
         list.replaceChildren();
         list.textContent = error.message;
       } finally {
+        list.setAttribute("aria-busy", "false");
         state.jobsLoadingPromise = null;
       }
     })();
@@ -3564,10 +3575,25 @@
     });
     list.replaceChildren();
     if (!jobs.length) {
-        const empty = document.createElement("div");
-        empty.className = "muted tiny";
-        empty.textContent = state.jobs.length ? "No jobs match your search." : "No post-processing jobs yet. Create one to begin.";
-        list.appendChild(empty);
+      const empty = document.createElement("div");
+      empty.className = "muted tiny";
+      if (state.jobs.length) {
+        empty.textContent = "No jobs match your search.";
+      } else {
+        const info = state.jobsLoadInfo;
+        const projectLabel = info?.projectId ? ` for project ${info.projectId}` : "";
+        const skippedLabel = info?.skipped?.length
+          ? ` ${info.skipped.length} job folder${info.skipped.length === 1 ? " was" : "s were"} skipped because job.json was missing or invalid.`
+          : "";
+        empty.textContent = `No post-processing job records were found${projectLabel}. Scanned ${info?.scanned || 0} job folders.${skippedLabel}`;
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "secondary tiny";
+        retry.textContent = "Reload jobs";
+        retry.addEventListener("click", () => void loadJobs(true));
+        empty.append(document.createElement("br"), retry);
+      }
+      list.appendChild(empty);
     }
     for (const job of jobs) renderJobItem(list, job);
   }

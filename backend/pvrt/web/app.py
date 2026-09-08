@@ -4477,8 +4477,8 @@ async def api_sessions():
     return {"ok": True, "sessions": details, "session_ids": ids}
 
 
-def _postprocess_jobs_dir() -> Path:
-    root = get_project_sessions_dir() / ".postprocess_jobs"
+def _postprocess_jobs_dir(project: Project | None = None) -> Path:
+    root = get_project_sessions_dir(project) / ".postprocess_jobs"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -4589,21 +4589,36 @@ def _read_postprocess_job(job_id: str) -> tuple[Path, dict[str, Any]]:
 
 
 @app.get("/api/postprocess-jobs")
-async def api_postprocess_jobs():
+async def api_postprocess_jobs(project_id: str | None = None):
     jobs = []
-    root = _postprocess_jobs_dir()
+    skipped_job_ids = []
+    scanned_job_folders = 0
+    project = None
+    if project_id:
+        project = project_manager.get_project(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found.")
+    root = _postprocess_jobs_dir(project)
     for directory in root.iterdir():
         if not directory.is_dir():
             continue
+        scanned_job_folders += 1
         metadata_path = directory / "job.json"
         try:
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
+            skipped_job_ids.append(directory.name)
             continue
         metadata["id"] = directory.name
         jobs.append(metadata)
     jobs.sort(key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
-    return {"ok": True, "jobs": jobs}
+    return {
+        "ok": True,
+        "project_id": project.id if project is not None else get_active_project().id,
+        "scanned_job_folders": scanned_job_folders,
+        "skipped_job_ids": skipped_job_ids,
+        "jobs": jobs,
+    }
 
 
 @app.post("/api/postprocess-jobs")
