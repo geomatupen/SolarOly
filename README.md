@@ -39,8 +39,8 @@ alignment, approximate mosaics, and panel/anomaly post-processing.
 
 SolarOly supports native installation. GPU and native-library combinations are
 easier to diagnose and keep consistent in a local Python environment. A
-CPU-only installation is documented below for development and limited testing,
-but training and production inference are not recommended on CPU.
+CPU-only installation is documented below, but CPU-only use is not recommended
+because training, inference, and image alignment can be prohibitively slow.
 
 Storage requirements depend on imagery and generated model artifacts. Keep
 project data on a disk with enough capacity for uploads, prepared images,
@@ -102,8 +102,9 @@ left linked to the old runtime.
 
 ### CPU-only installation
 
-CPU-only users must install SolarOly manually. Use the same virtual-environment
-steps above, but install the CPU PyTorch build before `requirements.txt`:
+CPU-only installation is not recommended. If you still need it for development
+or limited testing, use the same virtual-environment steps above, but install
+the CPU PyTorch build before `requirements.txt`:
 
 ```bash
 python -m pip install torch==2.5.1 torchvision==0.20.1 \
@@ -111,10 +112,9 @@ python -m pip install torch==2.5.1 torchvision==0.20.1 \
 python -m pip install --no-build-isolation -r requirements.txt
 ```
 
-This path is useful for setup checks and light post-processing, but model
-training, inference and image alignment can be prohibitively slow. Do not
-install a CUDA PyTorch build over the CPU environment later; recreate the
-virtual environment instead.
+Use this path only for setup checks and light post-processing. Do not install a
+CUDA PyTorch build over the CPU environment later; recreate the virtual
+environment instead.
 
 YOLO uses the CPU only when SolarOly is installed with the CPU-only PyTorch
 build. A CUDA-enabled PyTorch installation that cannot access its GPU is
@@ -144,8 +144,8 @@ Open <http://localhost:8001>. A healthy backend returns `{"ok": true}` from
 ## DJI Thermal SDK
 
 DJI's native Thermal SDK is proprietary and is **not distributed with
-SolarOly**. It is only required to decode radiometric DJI R-JPEG files. Download
-the appropriate Windows or Linux archive from the official
+SolarOly**. It is optional and only required to decode radiometric DJI R-JPEG files. 
+Download the appropriate Windows or Linux archive from the official
 [DJI Thermal SDK download page](https://www.dji.com/downloads/softwares/dji-thermal-sdk),
 review and accept DJI's included license and
 [SDK EULA](https://developer.dji.com/policies/eula/), then extract it outside
