@@ -147,15 +147,6 @@ uvicorn backend.pvrt.web.app:app --host 127.0.0.1 --port 8001
 Open <http://localhost:8001>. A healthy backend returns `{"ok": true}` from
 <http://localhost:8001/api/health>.
 
-The development server has no authentication or TLS. Do not expose port 8001
-directly to the public internet; use an authenticated HTTPS reverse proxy for
-shared or remote deployments.
-
-The default map uses third-party CDN assets and public OpenStreetMap/Esri tile
-services. These require network access and remain subject to each provider's
-availability and usage terms. For sustained, commercial or offline use,
-configure an appropriate tile provider or self-hosted service; do not bulk
-download from the public OpenStreetMap tile servers.
 
 ## DJI Thermal SDK
 
@@ -177,11 +168,13 @@ export LD_LIBRARY_PATH="$(dirname "$DIRP_SDK_PATH"):${LD_LIBRARY_PATH:-}"
 export PVRT_ENABLE_THERMAL=1
 ```
 
-Keep every companion library from the selected DJI `release_x64` directory
-together; `libdirp.so` is not a standalone file. Set `PVRT_ENABLE_THERMAL=0`
-when DJI decoding is not required. Ordinary RGB imagery including DJI R-JPEG (if you want to use them as JPEG and dont need decoding), orthophotos and
-already-rendered thermal PNG/JPEG files remain usable without the SDK, but DJI
-radiometric extraction and temperature values are unavailable.
+Do not copy `libdirp.so` by itself. Leave it in the DJI `release_x64` directory
+beside all the other SDK libraries it depends on, and point `DIRP_SDK_PATH` to
+that file. Set `PVRT_ENABLE_THERMAL=0` when DJI decoding is not required.
+Ordinary RGB imagery, DJI R-JPEG files used as regular JPEGs without radiometric
+decoding, orthophotos, and already-rendered thermal PNG/JPEG files remain usable
+without the SDK. DJI radiometric extraction and temperature values are then
+unavailable.
 
 ## Typical workflow
 
