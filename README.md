@@ -1,12 +1,21 @@
 # SolarOly
 
-SolarOly is an open-source solar PV inspection platform for preparing imagery,
-training and running segmentation or anomaly-detection models, reviewing
-GeoJSON results on a map, and producing isolated post-processing outputs.
+SolarOly is an open-source, end-to-end platform for AI-assisted inspection of
+solar PV assets. It lets users organize inspection projects; prepare and
+validate annotated RGB or thermal datasets; train and test Detectron2 or YOLO
+models for object detection and instance segmentation; run inference on
+individual geotagged images or imported orthophotos; and review images and
+GeoJSON predictions together on an interactive map. Optional tools can correct
+lens distortion, refine the position and orientation of overlapping images,
+and create approximate tiled mosaics. The post-processing workflow can merge
+tile-split panel segments, edit and regularize geometries, identify rows and
+panels, remove duplicate anomalies from overlapping images, associate anomalies
+with panels and rows, and export the finalized geospatial results.
 
-The FastAPI backend and browser frontend support DJI radiometric thermal
-imagery, orthophotos, Detectron2, Ultralytics YOLO, LightGlue image alignment,
-approximate mosaics, and panel/anomaly post-processing.
+SolarOly supports individual RGB and DJI radiometric thermal images, existing
+orthophotos, Detectron2, Ultralytics YOLO, LightGlue image alignment, and
+approximate tiled mosaics. It does not generate photogrammetric orthophotos;
+orthophotos must be created externally and then imported.
 
 ## Features
 
