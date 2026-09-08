@@ -203,6 +203,29 @@ pitch, roll or a full calibrated 3D camera pose. Unmatched images retain their
 metadata-derived pose. Corrected placement metadata is recorded in
 `camera_meta.json` and `image_alignment.json`.
 
+## How to use
+
+SolarOly supports two model backends: Detectron2 and Ultralytics YOLO. With
+Detectron2, use Faster R-CNN for object detection or Mask R-CNN for instance
+segmentation; YOLO also provides detection and segmentation model options.
+Choose detection when you need bounding boxes around objects, and segmentation
+when you need the precise shape of each object.
+
+The following tutorial videos show how to run main workflows in SolarOly:
+
+1. **[Training Models](https://youtu.be/gUGSJecp8uI)** — Import annotated
+   training data, choose Detectron2 or YOLO and the detection or segmentation
+   task, configure the run, and train a model.
+2. **[Testing Models](https://youtu.be/0EFslaQX-cM)** — Select a trained model,
+   run inference on individual images or an orthophoto, and inspect the
+   predictions in the Results and Map tabs.
+3. **[Testing Models with Advanced Options](https://youtu.be/AUtzEsTwp3M)** —
+   Correct lens distortion, refine individual-image position and orientation
+   with LightGlue, or create a tiled approximate mosaic before inference.
+4. **[Post Processing](https://youtu.be/R51QyKXfUsc)** — Merge tile-split solar
+   panel fragments, edit and regularize panel shapes, remove duplicate anomalies
+   from overlapping images, and assign anomalies to panels and rows.
+
 ## Project data
 
 Default projects are stored under:
