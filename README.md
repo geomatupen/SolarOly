@@ -46,19 +46,12 @@ Storage requirements depend on imagery and generated model artifacts. Keep
 project data on a disk with enough capacity for uploads, prepared images,
 overlays, model checkpoints and post-processing snapshots.
 
-### License-sensitive optional prerequisite
+### Optional DJI Thermal SDK
 
-If you need radiometric DJI R-JPEG decoding, download the native runtime from
-DJI's official [Thermal SDK download page](https://www.dji.com/downloads/softwares/dji-thermal-sdk)
-before installing SolarOly. The SDK is not open source and is not included in
-this repository. Review its packaged license and DJI's
-[SDK EULA](https://developer.dji.com/policies/eula/) yourself. The setup under
-[DJI Thermal SDK](#dji-thermal-sdk) explains how to point SolarOly at your
-local copy.
-
-No trained detection or segmentation weights are included. A model is not
-required to install or open SolarOly, but training or inference requires a
-compatible user-created or separately licensed checkpoint.
+DJI's native Thermal SDK is needed only for radiometric thermal extraction from
+DJI R-JPEG images. RGB-only training and testing do not require it. The SDK is
+not included with SolarOly; see [DJI Thermal SDK](#dji-thermal-sdk) for the
+download, licensing, and configuration details.
 
 ## Native installation
 
@@ -214,7 +207,8 @@ The following tutorial videos show how to run main workflows in SolarOly:
    predictions in the Results and Map tabs.
 3. **[Testing Models with Advanced Options](https://youtu.be/AUtzEsTwp3M)** —
    Correct lens distortion, refine individual-image position and orientation
-   with LightGlue, or create a tiled approximate mosaic before inference.
+   with LightGlue, or create a tiled approximate mosaic before inference. (only for  
+   individual images input)
 4. **[Post Processing](https://youtu.be/R51QyKXfUsc)** — Merge tile-split solar
    panel fragments, edit and regularize panel shapes, remove duplicate anomalies
    from overlapping images, and assign anomalies to panels and rows.
