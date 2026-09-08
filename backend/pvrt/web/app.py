@@ -21,7 +21,7 @@ from typing import Optional, List, Tuple, Dict, Any
 from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 
-from fastapi import FastAPI, Form, UploadFile, File, HTTPException, Response, Request
+from fastapi import FastAPI, Form, UploadFile, File, HTTPException, Response, Request, Query
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -57,6 +57,7 @@ from .bridge import train_entry, predict_entry
 from .demo_export import EXPORT_FILENAME, create_solar_demo_export
 from .postprocess import create_postprocess_router
 from .postprocess_layer_move import create_postprocess_layer_move_router, raster_shift_in_mercator
+from .result_pagination import paginate_result_manifest
 from .settings import settings
 
 if settings.enable_detectron:
@@ -4890,56 +4891,87 @@ async def api_delete_result(session_id: str):
     return {"ok": True, "id": session_dir.name}
 
 
-@app.get("/api/session_summary")
-async def api_session_summary(session: str):
-    summary_logger = logging.getLogger("pvrt.test")
-    summary_logger.info("UI:INFO:test: Loading result summary and asset catalog…")
-    ses = _session_asset_dir(session)
-    asset_session_id = ses.name
-
-    gj = ses / "predictions.geojson"
-    if not gj.exists():
-        gj = ses / "anomalies.geojson"  # legacy session compatibility
-    imgs_gj = ses / "images.geojson"    # NEW
-
-    manifest_path = ses / "manifest.json"
-    manifest = []
-
-    def _normalize_session_asset_url(value: Any) -> Any:
-        if not isinstance(value, str) or not value:
-            return value
-        try:
-            parsed = urlparse(value)
-            path = parsed.path or value
-        except Exception:
-            path = value
-
-        marker = f"/{asset_session_id}/"
-        if marker in path:
-            rel = path.split(marker, 1)[1]
-            if rel and any(rel.startswith(prefix) for prefix in ("overlays/", "thumbs/", "images/", "rotated_images/", "predictions.geojson", "anomalies.geojson", "images.geojson")):
-                target = ses / rel
-                if target.exists():
-                    return _media_url(target)
+def _normalize_session_asset_url(value: Any, ses: Path) -> Any:
+    if not isinstance(value, str) or not value:
         return value
+    try:
+        parsed = urlparse(value)
+        path = parsed.path or value
+    except Exception:
+        path = value
+    asset_session_id = ses.name
+    marker = f"/{asset_session_id}/"
+    if marker in path:
+        rel = path.split(marker, 1)[1]
+        allowed_prefixes = (
+            "overlays/", "thumbs/", "images/", "rotated_images/",
+            "predictions.geojson", "anomalies.geojson", "images.geojson",
+        )
+        if rel and any(rel.startswith(prefix) for prefix in allowed_prefixes):
+            target = ses / rel
+            if target.exists():
+                return _media_url(target)
+    return value
 
+
+def _read_session_manifest(ses: Path) -> list[dict[str, Any]]:
+    manifest_path = ses / "manifest.json"
+    manifest: list[dict[str, Any]] = []
     if manifest_path.exists():
         try:
             manifest_obj = json.loads(manifest_path.read_text())
-            # Convert manifest object to array with file field
-            manifest = []
-            for fname, entry in manifest_obj.items():
+            entries = manifest_obj.items() if isinstance(manifest_obj, dict) else []
+            for fname, entry in entries:
                 if isinstance(entry, dict):
                     normalized_entry = dict(entry)
                     if "overlay" in normalized_entry:
-                        normalized_entry["overlay"] = _normalize_session_asset_url(normalized_entry.get("overlay"))
+                        normalized_entry["overlay"] = _normalize_session_asset_url(
+                            normalized_entry.get("overlay"), ses
+                        )
                     if "thumb" in normalized_entry:
-                        normalized_entry["thumb"] = _normalize_session_asset_url(normalized_entry.get("thumb"))
+                        normalized_entry["thumb"] = _normalize_session_asset_url(
+                            normalized_entry.get("thumb"), ses
+                        )
                     manifest.append({"file": fname, **normalized_entry})
                 else:
                     manifest.append({"file": fname})
         except Exception:
             manifest = []
+    return manifest
+
+
+@app.get("/api/results/{session}/manifest")
+async def api_result_manifest_page(
+    session: str,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=100),
+    detected_only: bool = Query(default=False),
+):
+    ses = _session_asset_dir(session)
+    manifest = _read_session_manifest(ses)
+    result = paginate_result_manifest(
+        manifest,
+        page=page,
+        page_size=page_size,
+        detected_only=detected_only,
+    )
+    return {"ok": True, "session": session, **result}
+
+
+@app.get("/api/session_summary")
+async def api_session_summary(
+    session: str,
+    include_manifest: bool = Query(default=True),
+):
+    summary_logger = logging.getLogger("pvrt.test")
+    summary_logger.info("UI:INFO:test: Loading result summary and asset catalog…")
+    ses = _session_asset_dir(session)
+
+    gj = ses / "predictions.geojson"
+    if not gj.exists():
+        gj = ses / "anomalies.geojson"  # legacy session compatibility
+    imgs_gj = ses / "images.geojson"    # NEW
+    manifest = _read_session_manifest(ses) if include_manifest else []
     # collect assets and optional camera_meta.json
     assets = _session_assets(ses)
     summary_logger.info(

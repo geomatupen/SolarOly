@@ -1895,6 +1895,7 @@ async function runTest(){
     // The server-side run is complete; keep progress visible while its result is
     // loaded into the map, result grid, and session selectors.
     currentSession = js.session;
+    currentResultsSession = currentSession;
     setText("#testStatus", "Loading completed test result…");
     const loadingLine = "[test] Processing complete. Loading map and result assets…";
     appendMiniLog("#testMiniLog", loadingLine);
@@ -1903,7 +1904,7 @@ async function runTest(){
     await applySessionToMap(currentSession);
     appendMiniLog("#testMiniLog", "[test] Map assets loaded. Rendering result thumbnails…");
     appendLog("[test] Map assets loaded. Rendering result thumbnails…");
-    renderResultsGrid(js.manifest && js.manifest.length ? js.manifest : pairThumbs(js.assets));
+    await loadResultsPage(currentSession, 1);
     appendMiniLog("#testMiniLog", "[test] Result thumbnails rendered. Loading metrics and session list…");
     appendLog("[test] Result thumbnails rendered. Loading metrics and session list…");
     loadResultsInfo(currentSession);
@@ -1932,19 +1933,92 @@ async function runTest(){
 function cancelTest(){ if(testAbort){ testAbort.abort(); } }
 
 // ---------- results ----------
+const RESULTS_PAGE_SIZE = 100;
+let currentManifest = [];
+let resultsPageState = { page: 1, pageCount: 0, pageSize: RESULTS_PAGE_SIZE, total: 0 };
+let resultsPageRequestToken = 0;
+let currentResultsSession = null;
+
 async function showResultsForSelected(){
   const session = $("#selResults").value;
-  // console.log(session)
   if(!session) return;
   currentSession = session;
-  const res = await fetch(`${api.sessionSummary}?session=${encodeURIComponent(session)}`);
-  const js = await res.json();
-  if(!js.ok) return;
-  lastLoadedSessionSummary = js || null;
-  rotatedImagesLookup = null;
-  // console.log(js)
-  renderResultsGrid(js.manifest && js.manifest.length ? js.manifest : pairThumbs(js.assets));
-  loadResultsInfo(currentSession);
+  currentResultsSession = session;
+  try{
+    const res = await fetch(
+      `${api.sessionSummary}?session=${encodeURIComponent(session)}&include_manifest=false`,
+      { cache: 'no-store' },
+    );
+    const js = await res.json();
+    if(!res.ok || !js.ok){
+      throw new Error(js.detail || `Could not load result (${res.status}).`);
+    }
+    if(session !== currentResultsSession) return;
+    lastLoadedSessionSummary = js || null;
+    rotatedImagesLookup = null;
+    await loadResultsPage(session, 1);
+    if(session === currentResultsSession) loadResultsInfo(session);
+  }catch(error){
+    if(session !== currentResultsSession) return;
+    const grid = $("#resultsGrid");
+    if(grid) grid.innerHTML = `<div class="muted">${escapeHtml(error.message || String(error))}</div>`;
+    updateResultsPagination({ total: 0, page: 1, page_count: 0 });
+  }
+}
+
+function updateResultsPagination(payload){
+  const pagination = document.getElementById('resultsPagination');
+  const previous = document.getElementById('btnResultsPrevious');
+  const next = document.getElementById('btnResultsNext');
+  const status = document.getElementById('resultsPageStatus');
+  const total = Number(payload?.total || 0);
+  const page = Number(payload?.page || 1);
+  const pageCount = Number(payload?.page_count || 0);
+  const pageSize = Number(payload?.page_size || RESULTS_PAGE_SIZE);
+  resultsPageState = { page, pageCount, pageSize, total };
+  if(pagination) pagination.hidden = total === 0;
+  if(previous) previous.disabled = page <= 1;
+  if(next) next.disabled = pageCount === 0 || page >= pageCount;
+  if(status){
+    const first = total ? ((page - 1) * pageSize) + 1 : 0;
+    const last = Math.min(page * pageSize, total);
+    status.textContent = total
+      ? `${first}–${last} of ${total} · Page ${page} of ${pageCount}`
+      : 'No images';
+  }
+}
+
+async function loadResultsPage(session, page = 1){
+  if(!session) return;
+  const requestToken = ++resultsPageRequestToken;
+  const grid = $("#resultsGrid");
+  const detectedOnly = document.getElementById('chkShowOnlyDetections')?.checked === true;
+  if(grid) grid.innerHTML = '<div class="muted">Loading images…</div>';
+  const pagination = document.getElementById('resultsPagination');
+  if(pagination) pagination.hidden = true;
+  try{
+    const query = new URLSearchParams({
+      page: String(page),
+      page_size: String(RESULTS_PAGE_SIZE),
+      detected_only: detectedOnly ? 'true' : 'false',
+    });
+    const response = await fetch(
+      `/api/results/${encodeURIComponent(session)}/manifest?${query}`,
+      { cache: 'no-store' },
+    );
+    const payload = await response.json();
+    if(!response.ok || !payload.ok){
+      throw new Error(payload.detail || `Could not load result images (${response.status}).`);
+    }
+    if(requestToken !== resultsPageRequestToken || session !== currentResultsSession) return;
+    renderResultsGrid(Array.isArray(payload.items) ? payload.items : []);
+    updateResultsPagination(payload);
+  }catch(error){
+    if(requestToken !== resultsPageRequestToken || session !== currentResultsSession) return;
+    currentManifest = [];
+    if(grid) grid.innerHTML = `<div class="muted">${escapeHtml(error.message || String(error))}</div>`;
+    updateResultsPagination({ total: 0, page: 1, page_count: 0 });
+  }
 }
 
 function pairThumbs(assets){
@@ -2103,23 +2177,19 @@ function preferRotatedOverlays(manifest){
   return manifest;
 }
 function renderResultsGrid(manifest){
-  currentManifest = manifest;  // Store for filter re-rendering
+  currentManifest = Array.isArray(manifest) ? manifest : [];
   const grid = $("#resultsGrid");
   grid.innerHTML = "";
   
-  if(!manifest || !manifest.length){
-    grid.innerHTML = `<div class="muted">No overlays generated.</div>`;
+  if(!currentManifest.length){
+    const detectedOnly = document.getElementById('chkShowOnlyDetections')?.checked === true;
+    grid.innerHTML = `<div class="muted">${detectedOnly ? 'No images with detections.' : 'No overlays generated.'}</div>`;
+    return;
   }
 
-  manifest = preferRotatedOverlays(manifest);
-  const showOnlyDetections = document.getElementById('chkShowOnlyDetections')?.checked || false;
-  
-  // Build filtered list for lightbox navigation
-  const filteredItems = showOnlyDetections
-    ? manifest.filter(item => item.n && item.n > 0)
-    : manifest;
+  const pageItems = preferRotatedOverlays(currentManifest);
 
-  manifest.forEach((item, idx) => {
+  pageItems.forEach((item, idx) => {
     const div = document.createElement("div");
     div.className = "thumb";
 
@@ -2138,29 +2208,22 @@ function renderResultsGrid(manifest){
       : '';
 
     div.innerHTML = `
-      <img src="${item.thumb}" alt="${item.file}">
+      <img src="${item.thumb || item.overlay || ''}" alt="${item.file}" loading="lazy" decoding="async">
       <div class="meta" title="${item.file}">${item.file}</div>
       ${detectionBadge}
       ${correctionBadge}
     `;
 
-    // Hide if filter is on and no detections
-    if (showOnlyDetections && (!item.n || item.n === 0)) {
-      div.classList.add('hidden-by-filter');
-    }
-
     div.addEventListener("click", () => {
-      // Find the index of this item in the filtered list
-      const filteredIdx = filteredItems.indexOf(item);
-      _openLightboxWithGallery(filteredItems, filteredIdx);
+      _openLightboxWithGallery(pageItems, idx);
     });
     grid.appendChild(div);
   });
 }
 
-function _applyDetectionFilter(){
-  if(!currentManifest) return;
-  renderResultsGrid(currentManifest);
+async function _applyDetectionFilter(){
+  if(!currentResultsSession) return;
+  await loadResultsPage(currentResultsSession, 1);
 }
 
 // ---------- map ----------
@@ -3775,6 +3838,22 @@ function setupUI(){
   });
   const selResults = $("#selResults");
   if(selResults) selResults.addEventListener("change", showResultsForSelected);
+  const btnResultsPrevious = document.getElementById('btnResultsPrevious');
+  if(btnResultsPrevious){
+    btnResultsPrevious.addEventListener('click', () => {
+      if(currentResultsSession && resultsPageState.page > 1){
+        void loadResultsPage(currentResultsSession, resultsPageState.page - 1);
+      }
+    });
+  }
+  const btnResultsNext = document.getElementById('btnResultsNext');
+  if(btnResultsNext){
+    btnResultsNext.addEventListener('click', () => {
+      if(currentResultsSession && resultsPageState.page < resultsPageState.pageCount){
+        void loadResultsPage(currentResultsSession, resultsPageState.page + 1);
+      }
+    });
+  }
 
   const btnRefreshMapSessions = $("#btnRefreshMapSessions");
   if(btnRefreshMapSessions) btnRefreshMapSessions.addEventListener("click", async ()=>{
