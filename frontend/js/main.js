@@ -1904,10 +1904,12 @@ async function runTest(){
     await applySessionToMap(currentSession);
     appendMiniLog("#testMiniLog", "[test] Map assets loaded. Rendering result thumbnails…");
     appendLog("[test] Map assets loaded. Rendering result thumbnails…");
-    await loadResultsPage(currentSession, 1);
-    appendMiniLog("#testMiniLog", "[test] Result thumbnails rendered. Loading metrics and session list…");
-    appendLog("[test] Result thumbnails rendered. Loading metrics and session list…");
-    loadResultsInfo(currentSession);
+    await Promise.all([
+      loadResultsPage(currentSession, 1),
+      loadResultsInfo(currentSession),
+    ]);
+    appendMiniLog("#testMiniLog", "[test] Result images, metrics, and model data loaded. Refreshing session list…");
+    appendLog("[test] Result images, metrics, and model data loaded. Refreshing session list…");
     
     await loadSessions(true);
     appendMiniLog("#testMiniLog", "[test] Session list refreshed. Test result is ready.");
@@ -1944,6 +1946,9 @@ async function showResultsForSelected(){
   if(!session) return;
   currentSession = session;
   currentResultsSession = session;
+  renderResultsInfoLoading();
+  const grid = $("#resultsGrid");
+  if(grid) grid.innerHTML = '<div class="mapListLoading"><span class="spinner" aria-hidden="true"></span><span>Loading images…</span></div>';
   try{
     const res = await fetch(
       `${api.sessionSummary}?session=${encodeURIComponent(session)}&include_manifest=false`,
@@ -1956,12 +1961,15 @@ async function showResultsForSelected(){
     if(session !== currentResultsSession) return;
     lastLoadedSessionSummary = js || null;
     rotatedImagesLookup = null;
-    await loadResultsPage(session, 1);
-    if(session === currentResultsSession) loadResultsInfo(session);
+    await Promise.all([
+      loadResultsPage(session, 1),
+      loadResultsInfo(session),
+    ]);
   }catch(error){
     if(session !== currentResultsSession) return;
-    const grid = $("#resultsGrid");
     if(grid) grid.innerHTML = `<div class="muted">${escapeHtml(error.message || String(error))}</div>`;
+    renderResultsInfoSection('resultsMetricsBody', null, 'Test metrics could not be loaded.');
+    renderResultsInfoSection('resultsModelBody', null, 'Model data could not be loaded.');
     updateResultsPagination({ total: 0, page: 1, page_count: 0 });
   }
 }
@@ -1993,7 +2001,7 @@ async function loadResultsPage(session, page = 1){
   const requestToken = ++resultsPageRequestToken;
   const grid = $("#resultsGrid");
   const detectedOnly = document.getElementById('chkShowOnlyDetections')?.checked === true;
-  if(grid) grid.innerHTML = '<div class="muted">Loading images…</div>';
+  if(grid) grid.innerHTML = '<div class="mapListLoading"><span class="spinner" aria-hidden="true"></span><span>Loading images…</span></div>';
   const pagination = document.getElementById('resultsPagination');
   if(pagination) pagination.hidden = true;
   try{
@@ -2191,7 +2199,7 @@ function renderResultsGrid(manifest){
 
   pageItems.forEach((item, idx) => {
     const div = document.createElement("div");
-    div.className = "thumb";
+    div.className = "thumb image-loading";
 
     // Add detection indicator badge if detections exist
     const detectionBadge = (item.n && item.n > 0)
@@ -2208,11 +2216,20 @@ function renderResultsGrid(manifest){
       : '';
 
     div.innerHTML = `
-      <img src="${item.thumb || item.overlay || ''}" alt="${item.file}" loading="lazy" decoding="async">
+      <img src="${item.thumb || item.overlay || ''}" alt="${item.file}" decoding="async">
+      <div class="thumbLoading"><span class="spinner" aria-hidden="true"></span><span>Loading…</span></div>
       <div class="meta" title="${item.file}">${item.file}</div>
       ${detectionBadge}
       ${correctionBadge}
     `;
+
+    const image = div.querySelector('img');
+    const finishImageLoading = () => div.classList.remove('image-loading');
+    if(image?.complete) finishImageLoading();
+    else{
+      image?.addEventListener('load', finishImageLoading, { once: true });
+      image?.addEventListener('error', finishImageLoading, { once: true });
+    }
 
     div.addEventListener("click", () => {
       _openLightboxWithGallery(pageItems, idx);
@@ -4538,26 +4555,35 @@ function renderJsonList(obj) {
   return `<ul class="kv-list">${rows}</ul>`;
 }
 
-// --- render the two cards (metrics + model meta) inside #resultsInfo ---
-function renderResultsInfo(metrics, modelMeta) {
+// --- independent loading states for metrics and model meta ---
+function renderResultsInfoLoading() {
   const root = document.getElementById("resultsInfo");
   if (!root) return;
-
+  root.hidden = false;
   root.innerHTML = `
     <div class="info-grid">
-      ${metrics ? `
-        <section class="info-card">
-          <h4>Test Metrics</h4>
-          ${renderJsonList(metrics)}
-        </section>` : ``}
-      ${modelMeta ? `
-        <section class="info-card">
-          <h4>Model Meta</h4>
-          ${renderJsonList(modelMeta)}
-        </section>` : ``}
+      <section class="info-card">
+        <h4>Test Metrics</h4>
+        <div id="resultsMetricsBody" aria-live="polite">
+          <div class="mapListLoading"><span class="spinner" aria-hidden="true"></span><span>Loading test metrics…</span></div>
+        </div>
+      </section>
+      <section class="info-card">
+        <h4>Model Meta</h4>
+        <div id="resultsModelBody" aria-live="polite">
+          <div class="mapListLoading"><span class="spinner" aria-hidden="true"></span><span>Loading model data…</span></div>
+        </div>
+      </section>
     </div>
   `;
-  root.hidden = !(metrics || modelMeta);
+}
+
+function renderResultsInfoSection(elementId, data, emptyMessage){
+  const body = document.getElementById(elementId);
+  if(!body) return;
+  body.innerHTML = data
+    ? renderJsonList(data)
+    : `<p class="muted tiny">${escapeHtml(emptyMessage)}</p>`;
 }
 
 // Try to pull "train_YYYYMMDD_HHMMSS" out of model_name if we need a fallback
@@ -4569,9 +4595,8 @@ function deriveRunNameFromModelName(name) {
 
 // Fetch metrics + model meta for a session, then render
 async function loadResultsInfo(sessionName) {
-  const infoEl = document.getElementById("resultsInfo");
   const predictions_title = document.getElementById("predictionsTitle");
-  if (infoEl) { infoEl.hidden = true; infoEl.innerHTML = ""; }
+  renderResultsInfoLoading();
 
   let metrics = null, meta = null;
 
@@ -4580,8 +4605,15 @@ async function loadResultsInfo(sessionName) {
     const r = await fetch(`/api/results/${encodeURIComponent(sessionName)}/metrics`, { cache: "no-store" });
     if (r.ok) metrics = await r.json();
   } catch {}
+  if(sessionName !== currentResultsSession) return;
+  renderResultsInfoSection('resultsMetricsBody', metrics, 'Test metrics are not available.');
+  if(predictions_title){
+    predictions_title.textContent = metrics?.total_detections != null
+      ? `Predictions: ${metrics.total_detections}`
+      : 'Predictions';
+  }
 
-  // 3) fallback: derive run name from metrics.model_name → /api/runs/{run}/meta
+  // Derive the training run from metrics.model_name, then load its model metadata.
   if (!meta && metrics?.model_name) {
     const runName = deriveRunNameFromModelName(metrics.model_name);
     if (runName) {
@@ -4591,11 +4623,6 @@ async function loadResultsInfo(sessionName) {
       } catch {}
     }
   }
-
-  renderResultsInfo(metrics, meta);
-  if(predictions_title){
-    predictions_title.textContent = metrics?.total_detections != null
-      ? `Predictions: ${metrics.total_detections}`
-      : 'Predictions';
-  }
+  if(sessionName !== currentResultsSession) return;
+  renderResultsInfoSection('resultsModelBody', meta, 'Model data is not available.');
 }

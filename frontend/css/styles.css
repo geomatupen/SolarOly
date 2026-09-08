@@ -294,6 +294,10 @@ button:disabled{ opacity:0.5; cursor:not-allowed; }
 .resultsPagination[hidden]{ display:none; }
 .resultsPagination button{ min-width:86px; }
 .resultsPagination span{ min-width:210px; text-align:center; }
+.thumb.image-loading{ min-height:120px; }
+.thumb.image-loading img{ opacity:0; }
+.thumb .thumbLoading{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:7px; color:var(--muted); }
+.thumb:not(.image-loading) .thumbLoading{ display:none; }
 
 
 /* Map + right panel */
