@@ -10,7 +10,6 @@ let currentSession = null;
 let styleTarget = null;
 let layerMenuState = { name: null, info: null };
 let mapDetectionFilterActive = false;
-let prevMapDetectionStates = null;
 let activeGeoJsonHoverReset = null;
 
 function addGeoJsonHoverHighlight(feature, featureLayer) {
@@ -55,6 +54,10 @@ window.addGeoJsonHoverHighlight = addGeoJsonHoverHighlight;
 let imageCatalog = [];              // [{ id, name, url, bounds, on }]
 let imageOverlays = new Map();      // id -> L.ImageOverlay
 let imagesOpacity = 0.85;           // global opacity for image overlays
+const MAX_ACTIVE_IMAGE_OVERLAYS = 30;
+const MAP_IMAGE_LIST_PAGE_SIZE = 100;
+let mapImageListPage = 1;
+let mapIndividualImageControlsVisible = true;
 
 // Last loaded images.geojson and session information.
 let lastLoadedImagesGJ = null;
@@ -97,14 +100,60 @@ function removeTifTiles(){
 function clearImageOverlays(){
   for (const ov of imageOverlays.values()){
     try { imagesLayerGroup.removeLayer(ov); } catch(_){}
+    try { ov.remove?.(); } catch(_){}
   }
   imageOverlays.clear();
+  mapImageListPage = 1;
+  updateImageOverlayControls();
+}
+
+function setMapImagesMessage(message = ''){
+  const element = document.getElementById('mapImagesMessage');
+  if(!element) return;
+  element.textContent = message;
+  element.hidden = !message;
+}
+
+function activeImageOverlayCount(){
+  return imageCatalog.reduce((count, rec) => count + (rec.on ? 1 : 0), 0);
+}
+
+function updateImageOverlayControls(){
+  const activeCount = activeImageOverlayCount();
+  const detectedCount = imageCatalog.filter(rec => Number(rec.n || 0) > 0).length;
+  const showAll = document.getElementById('btnShowAllImages');
+  const showDetected = document.getElementById('btnShowDetectedImages');
+  const hideAll = document.getElementById('btnHideAllImages');
+  const count = document.getElementById('mapImagesActiveCount');
+
+  if(count) count.textContent = `${activeCount} / ${MAX_ACTIVE_IMAGE_OVERLAYS} shown`;
+  if(showAll){
+    showAll.disabled = !imageCatalog.length || imageCatalog.length > MAX_ACTIVE_IMAGE_OVERLAYS;
+    showAll.title = imageCatalog.length > MAX_ACTIVE_IMAGE_OVERLAYS
+      ? `${imageCatalog.length} images are available. Select up to ${MAX_ACTIVE_IMAGE_OVERLAYS} individually.`
+      : 'Display every individual image';
+  }
+  if(showDetected){
+    showDetected.disabled = detectedCount === 0 || detectedCount > MAX_ACTIVE_IMAGE_OVERLAYS;
+    showDetected.title = detectedCount > MAX_ACTIVE_IMAGE_OVERLAYS
+      ? `${detectedCount} detected images are available. Select up to ${MAX_ACTIVE_IMAGE_OVERLAYS} individually.`
+      : detectedCount
+        ? `Display all ${detectedCount} images with detections`
+        : 'No individual images with detections are available';
+  }
+  if(hideAll) hideAll.disabled = activeCount === 0;
 }
 
 // turn one image overlay on/off by id
-function toggleImageOverlay(id, on){
+function toggleImageOverlay(id, on, refreshControls = true){
   const rec = imageCatalog.find(x => x.id === id);
-  if (!rec) return;
+  if (!rec) return false;
+
+  if(on && !rec.on && activeImageOverlayCount() >= MAX_ACTIVE_IMAGE_OVERLAYS){
+    setMapImagesMessage(`Maximum ${MAX_ACTIVE_IMAGE_OVERLAYS} individual images can be displayed at once.`);
+    updateImageOverlayControls();
+    return false;
+  }
 
   let ov = imageOverlays.get(id);
   if (on){
@@ -122,26 +171,59 @@ function toggleImageOverlay(id, on){
     rec.on = true;
 
   } else {
-    if (ov){ try{ imagesLayerGroup.removeLayer(ov); }catch(_){ } }
+    if (ov){
+      try{ imagesLayerGroup.removeLayer(ov); }catch(_){ }
+      try{ ov.remove?.(); }catch(_){ }
+      imageOverlays.delete(id);
+    }
     rec.on = false;
   }
-
+  setMapImagesMessage('');
+  if(refreshControls) updateImageOverlayControls();
+  return true;
 }
 
 // turn ALL images on/off (used by Show all / Hide all buttons)
 function setAllImageOverlays(on){
+  if(on && imageCatalog.length > MAX_ACTIVE_IMAGE_OVERLAYS){
+    setMapImagesMessage(`Show all is limited to ${MAX_ACTIVE_IMAGE_OVERLAYS} images. Select images individually.`);
+    updateImageOverlayControls();
+    return false;
+  }
   for (const rec of imageCatalog){
-    toggleImageOverlay(rec.id, on);
+    if(!on && !rec.on) continue;
+    toggleImageOverlay(rec.id, on, false);
     const sel = `.imgToggle[data-id="${CSS.escape(rec.id)}"]`;
     const cb = document.querySelector(sel);
     if (cb) cb.checked = on;
   }
+  updateImageOverlayControls();
+  renderImagesList();
+  return true;
+}
+
+function showDetectedImageOverlays(){
+  const detected = imageCatalog.filter(rec => Number(rec.n || 0) > 0);
+  if(!detected.length) return;
+  if(detected.length > MAX_ACTIVE_IMAGE_OVERLAYS){
+    setMapImagesMessage(`${detected.length} detected images are available. Select up to ${MAX_ACTIVE_IMAGE_OVERLAYS} individually.`);
+    updateImageOverlayControls();
+    return;
+  }
+  for(const rec of imageCatalog){
+    if(rec.on) toggleImageOverlay(rec.id, false, false);
+  }
+  for(const rec of detected) toggleImageOverlay(rec.id, true, false);
+  updateImageOverlayControls();
+  renderImagesList();
 }
 
 // build the sidebar list from imageCatalog
 function renderImagesList(){
   const ul = document.getElementById('imagesList');
   if (!ul) return;
+  const tileRow = ul.querySelector('#chkTifTiles')?.closest('li') || null;
+  if(tileRow) tileRow.remove();
 
   if (!imageCatalog.length){
     const located = Array.isArray(lastLoadedImagesGJ?.features)
@@ -150,6 +232,10 @@ function renderImagesList(){
     ul.innerHTML = located
       ? `<li class="dim">${located} image location${located === 1 ? '' : 's'} loaded. No individual image overlays are available.</li>`
       : `<li class="dim">No geolocated images in this session</li>`;
+    if(tileRow) ul.prepend(tileRow);
+    const pagination = document.getElementById('mapImagesPagination');
+    if(pagination) pagination.hidden = true;
+    updateImageOverlayControls();
     return;
   }
 
@@ -158,7 +244,12 @@ function renderImagesList(){
     ? imageCatalog.filter(rec => rec.n && rec.n > 0)
     : imageCatalog;
 
-  ul.innerHTML = filtered.map(rec => `
+  const pageCount = filtered.length ? Math.ceil(filtered.length / MAP_IMAGE_LIST_PAGE_SIZE) : 0;
+  mapImageListPage = Math.min(Math.max(1, mapImageListPage), Math.max(1, pageCount));
+  const pageStart = (mapImageListPage - 1) * MAP_IMAGE_LIST_PAGE_SIZE;
+  const pageItems = filtered.slice(pageStart, pageStart + MAP_IMAGE_LIST_PAGE_SIZE);
+
+  ul.innerHTML = pageItems.length ? pageItems.map(rec => `
     <li>
       <label class="chk">
         <input type="checkbox" class="imgToggle" data-id="${escapeHtml(rec.id)}" ${rec.on ? 'checked' : ''}>
@@ -166,51 +257,53 @@ function renderImagesList(){
       </label>
       <button class="iconDots imgMenu" data-id="${escapeHtml(rec.id)}" title="Options">⋮</button>
     </li>
-  `).join('');
+  `).join('') : '<li class="dim">No images with detections</li>';
+  if(tileRow) ul.prepend(tileRow);
+
+  const pagination = document.getElementById('mapImagesPagination');
+  const previous = document.getElementById('btnMapImagesPrevious');
+  const next = document.getElementById('btnMapImagesNext');
+  const status = document.getElementById('mapImagesPageStatus');
+  if(pagination) pagination.hidden = !mapIndividualImageControlsVisible || pageCount <= 1;
+  if(previous) previous.disabled = mapImageListPage <= 1;
+  if(next) next.disabled = pageCount === 0 || mapImageListPage >= pageCount;
+  if(status){
+    const first = filtered.length ? pageStart + 1 : 0;
+    const last = Math.min(pageStart + MAP_IMAGE_LIST_PAGE_SIZE, filtered.length);
+    status.textContent = `${first}–${last} of ${filtered.length}`;
+  }
+  updateImageOverlayControls();
 }
 
 function applyMapDetectionFilter(){
   const chk = document.getElementById('chkMapShowOnlyDetections');
   const on = chk?.checked || false;
   mapDetectionFilterActive = on;
-
-  if (on){
-    prevMapDetectionStates = new Map();
-    for (const rec of imageCatalog){
-      prevMapDetectionStates.set(rec.id, !!rec.on);
-      const hasDetections = !!(rec.n && rec.n > 0);
-      if (hasDetections && !rec.on){
-        toggleImageOverlay(rec.id, true);
-      } else if (!hasDetections && rec.on){
-        toggleImageOverlay(rec.id, false);
-      }
-    }
-  } else if (prevMapDetectionStates){
-    for (const rec of imageCatalog){
-      const desired = prevMapDetectionStates.has(rec.id) ? prevMapDetectionStates.get(rec.id) : true;
-      if (rec.on !== desired){
-        toggleImageOverlay(rec.id, desired);
-      }
-    }
-    prevMapDetectionStates = null;
-  }
-
+  mapImageListPage = 1;
   renderImagesList();
 }
 
-function updateMapDetectionFilterVisibility(hasTifTiles){
+function updateMapDetectionFilterVisibility(hidden){
   const wrap = document.getElementById('mapDetectionsFilter');
   if (!wrap) return;
-  // Hide filters for orthophoto/tiles pipeline
-  wrap.style.display = hasTifTiles ? 'none' : 'flex';
+  wrap.style.display = hidden ? 'none' : 'flex';
+  if(hidden){
+    const checkbox = document.getElementById('chkMapShowOnlyDetections');
+    if(checkbox) checkbox.checked = false;
+    mapDetectionFilterActive = false;
+  }
 }
 
-function updateImageListButtonsVisibility(hasTifTiles){
-  const btnShowAll = document.getElementById('btnShowAllImages');
-  const btnHideAll = document.getElementById('btnHideAllImages');
-  // Hide "Show all" and "Hide all" buttons for orthophoto/tiles pipeline
-  if (btnShowAll) btnShowAll.style.display = hasTifTiles ? 'none' : 'block';
-  if (btnHideAll) btnHideAll.style.display = hasTifTiles ? 'none' : 'block';
+function updateImageListButtonsVisibility(hidden){
+  mapIndividualImageControlsVisible = !hidden;
+  const actions = document.getElementById('imageOverlayActions');
+  const opacity = document.getElementById('imageOpacityControls');
+  const pagination = document.getElementById('mapImagesPagination');
+  const message = document.getElementById('mapImagesMessage');
+  if(actions) actions.style.display = hidden ? 'none' : 'flex';
+  if(opacity) opacity.style.display = hidden ? 'none' : 'flex';
+  if(pagination && hidden) pagination.hidden = true;
+  if(message && hidden) message.hidden = true;
 }
 
 

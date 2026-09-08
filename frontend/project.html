@@ -5,7 +5,7 @@
   <title>SolarOly</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <link rel="stylesheet" href="css/styles.css?v=20260901a" />
+  <link rel="stylesheet" href="css/styles.css?v=20260908a" />
   <link rel="stylesheet" href="css/postprocess.css?v=20260906a" />
 
   <!-- Leaflet -->
@@ -898,24 +898,32 @@
 
             <div class="panelHeader" style="margin-top:6px;">
               <h3>Images</h3>
-              <div class="row">
+              <div id="imageOverlayActions" class="row">
                 <button id="btnShowAllImages" class="iconBtn tiny">Show all</button>
+                <button id="btnShowDetectedImages" class="iconBtn tiny">Show detected</button>
                 <button id="btnHideAllImages" class="iconBtn tiny">Hide all</button>
               </div>
             </div>
-            <div style="padding: 6px 8px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; font-size: 12px;">
+            <div id="imageOpacityControls" style="padding: 6px 8px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; font-size: 12px;">
               <label for="imagesOpacitySlider" style="min-width: 60px; margin: 0;">Opacity:</label>
               <input type="range" id="imagesOpacitySlider" min="0" max="100" value="100" style="flex: 1; max-width: 100px;">
               <span id="imagesOpacityValue" style="min-width: 30px;">100%</span>
+              <span id="mapImagesActiveCount" class="muted" style="margin-left:auto; white-space:nowrap;">0 / 30 shown</span>
             </div>
             <div id="mapDetectionsFilter" style="padding: 6px 0; border-bottom: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 14px;">
               <label style="display: flex; align-items: center; gap: 8px; margin: 0; padding: 0 4px; font-size: 12px;">
                 <input type="checkbox" id="chkMapShowOnlyDetections" />
-                <span>Show only detected</span>
+                <span>List only detected</span>
               </label>
             </div>
             <div class="listScroll">
               <ul id="imagesList" class="layersList"></ul>
+            </div>
+            <div id="mapImagesMessage" class="muted tiny mapImagesMessage" role="status" aria-live="polite" hidden></div>
+            <div id="mapImagesPagination" class="resultsPagination mapImagesPagination" hidden>
+              <button id="btnMapImagesPrevious" class="secondary tiny" type="button">Previous</button>
+              <span id="mapImagesPageStatus" class="muted tiny" aria-live="polite"></span>
+              <button id="btnMapImagesNext" class="secondary tiny" type="button">Next</button>
             </div>
 
             <div id="legend" class="legend"></div>
@@ -1620,11 +1628,11 @@
   <script src="js/utils.js?v=20260902a"></script>
   <script src="js/measure-control.js?v=20260830b"></script>
   <script src="js/georeferenced-image-overlay.js?v=20260901b"></script>
-  <script src="js/map.js?v=20260902a"></script>
+  <script src="js/map.js?v=20260908a"></script>
   <script src="js/map-overlay.js?v=20260902a"></script>
   <script src="js/test-image-alignment.js?v=20260901e"></script>
   <script src="js/project-tab-router.js?v=20260902a"></script>
-  <script src="js/main.js?v=20260902b"></script>
+  <script src="js/main.js?v=20260908a"></script>
   <script src="js/postprocess-layer-move.js?v=20260902e"></script>
   <script src="js/postprocess.js?v=20260906d"></script>
   <script src="js/postprocess_segmentation.js?v=20260903d"></script>

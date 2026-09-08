@@ -4972,6 +4972,10 @@ async def api_session_summary(
         gj = ses / "anomalies.geojson"  # legacy session compatibility
     imgs_gj = ses / "images.geojson"    # NEW
     manifest = _read_session_manifest(ses) if include_manifest else []
+    try:
+        result_metrics = _load_metrics(ses)
+    except (OSError, json.JSONDecodeError, TypeError):
+        result_metrics = {}
     # collect assets and optional camera_meta.json
     assets = _session_assets(ses)
     summary_logger.info(
@@ -5008,6 +5012,8 @@ async def api_session_summary(
         # Helpful flags for the frontend
         "rotated_images_available": bool(rotated_images_available),
         "camera_meta": camera_meta,
+        "mosaic_created": bool(result_metrics.get("mosaic_created", False)),
+        "inference_source": str(result_metrics.get("inference_source") or "individual"),
     }
 
 

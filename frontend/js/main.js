@@ -2878,11 +2878,14 @@ async function applySessionToMap(sessionName){
   }catch(e){ console.warn('session_tiles failed:', e); }
 
   const hasTifTiles = !!(tiles?.ok && Array.isArray(tiles.layers) && tiles.layers.length);
+  const isGeneratedMosaic = sum?.mosaic_created === true;
+  const mosaicOnlyInference = isGeneratedMosaic && sum?.inference_source === 'mosaic';
+  const hideIndividualImageControls = hasTifTiles && !isGeneratedMosaic;
 
   if (hasTifTiles){
-    setMapSectionLoading(true, "Loading orthophoto tiles…");
-    updateMapDetectionFilterVisibility(true);
-    updateImageListButtonsVisibility(true);
+    setMapSectionLoading(true, isGeneratedMosaic ? "Loading mosaic tiles…" : "Loading orthophoto tiles…");
+    updateMapDetectionFilterVisibility(hideIndividualImageControls || mosaicOnlyInference);
+    updateImageListButtonsVisibility(hideIndividualImageControls);
     const b = createTifTileGroup(tiles.layers);
     TIF_TILE_GROUP  = b.group;
     TIF_TILE_LAYERS = b.layers;
@@ -2891,7 +2894,7 @@ async function applySessionToMap(sessionName){
 
     // show controller row inside Images list (replaces normal images there)
     await loadImagesCatalog(sessionName, imagesUrl);
-    appendTestLoadLog("Orthophoto tile catalog loaded. Waiting for map tiles…");
+    appendTestLoadLog(`${isGeneratedMosaic ? 'Mosaic' : 'Orthophoto'} tile catalog loaded. Waiting for map tiles…`);
     installTilesIntoImagesList(sessionName, tiles.layers, false);
 
     await waitForMapTiles(b.layers);
@@ -3279,7 +3282,8 @@ if (imagesListEl){
     const t = e.target;
     if (t && t.classList.contains('imgToggle')){
       const id = t.getAttribute('data-id');
-      toggleImageOverlay(id, t.checked);
+      const changed = toggleImageOverlay(id, t.checked);
+      if(changed === false) t.checked = false;
     }
   });
   imagesListEl.addEventListener('click', (e)=>{
@@ -3290,9 +3294,20 @@ if (imagesListEl){
 }
 
 const btnShowAll = document.getElementById('btnShowAllImages');
+const btnShowDetected = document.getElementById('btnShowDetectedImages');
 const btnHideAll = document.getElementById('btnHideAllImages');
 if (btnShowAll) btnShowAll.addEventListener('click', ()=> setAllImageOverlays(true));
+if (btnShowDetected) btnShowDetected.addEventListener('click', showDetectedImageOverlays);
 if (btnHideAll) btnHideAll.addEventListener('click', ()=> setAllImageOverlays(false));
+document.getElementById('btnMapImagesPrevious')?.addEventListener('click', ()=>{
+  if(mapImageListPage <= 1) return;
+  mapImageListPage -= 1;
+  renderImagesList();
+});
+document.getElementById('btnMapImagesNext')?.addEventListener('click', ()=>{
+  mapImageListPage += 1;
+  renderImagesList();
+});
 
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('.popupImageToggle');
@@ -3302,7 +3317,8 @@ document.addEventListener('click', (e) => {
   const rec = imageCatalog.find(r => r.id === imageId);
   if (!rec) return;
   const nextState = !rec.on;
-  toggleImageOverlay(imageId, nextState);
+  const changed = toggleImageOverlay(imageId, nextState);
+  if(changed === false) return;
   const checkbox = document.querySelector(`.imgToggle[data-id="${CSS.escape(imageId)}"]`);
   if (checkbox){
     checkbox.checked = nextState;
