@@ -298,6 +298,7 @@ button:disabled{ opacity:0.5; cursor:not-allowed; }
 .mapImagesPagination span{ min-width:105px; }
 .mapImagesPagination button{ min-width:64px; }
 .mapImagesMessage{ padding:4px 8px; color:#f59e0b; }
+.mapImagesActiveStatus{ padding:2px 8px 6px; border-bottom:1px solid var(--border); text-align:right; font-size:11px; }
 .thumb.image-loading{ min-height:120px; }
 .thumb.image-loading img{ opacity:0; }
 .thumb .thumbLoading{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:7px; color:var(--muted); }

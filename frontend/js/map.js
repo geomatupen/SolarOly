@@ -54,7 +54,7 @@ window.addGeoJsonHoverHighlight = addGeoJsonHoverHighlight;
 let imageCatalog = [];              // [{ id, name, url, bounds, on }]
 let imageOverlays = new Map();      // id -> L.ImageOverlay
 let imagesOpacity = 0.85;           // global opacity for image overlays
-const MAX_ACTIVE_IMAGE_OVERLAYS = 30;
+const MAX_ACTIVE_IMAGE_OVERLAYS = 50;
 const MAP_IMAGE_LIST_PAGE_SIZE = 100;
 let mapImageListPage = 1;
 let mapIndividualImageControlsVisible = true;
@@ -126,7 +126,7 @@ function updateImageOverlayControls(){
   const hideAll = document.getElementById('btnHideAllImages');
   const count = document.getElementById('mapImagesActiveCount');
 
-  if(count) count.textContent = `${activeCount} / ${MAX_ACTIVE_IMAGE_OVERLAYS} shown`;
+  if(count) count.textContent = `${activeCount} / ${MAX_ACTIVE_IMAGE_OVERLAYS} images shown`;
   if(showAll){
     showAll.disabled = !imageCatalog.length || imageCatalog.length > MAX_ACTIVE_IMAGE_OVERLAYS;
     showAll.title = imageCatalog.length > MAX_ACTIVE_IMAGE_OVERLAYS
@@ -298,10 +298,12 @@ function updateImageListButtonsVisibility(hidden){
   mapIndividualImageControlsVisible = !hidden;
   const actions = document.getElementById('imageOverlayActions');
   const opacity = document.getElementById('imageOpacityControls');
+  const activeStatus = document.getElementById('mapImagesActiveStatus');
   const pagination = document.getElementById('mapImagesPagination');
   const message = document.getElementById('mapImagesMessage');
   if(actions) actions.style.display = hidden ? 'none' : 'flex';
   if(opacity) opacity.style.display = hidden ? 'none' : 'flex';
+  if(activeStatus) activeStatus.style.display = hidden ? 'none' : 'block';
   if(pagination && hidden) pagination.hidden = true;
   if(message && hidden) message.hidden = true;
 }

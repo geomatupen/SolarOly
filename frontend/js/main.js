@@ -365,6 +365,9 @@ let _resultsTabLoaded = false;
 let _resultsTabLoading = null;
 let _mapTabLoaded = false;
 let _mapTabLoading = null;
+let mapSessionAbortController = null;
+let mapSessionLoadToken = 0;
+let currentMapSession = null;
 const _mapDetachedRasterLayers = new Set();
 
 async function ensureResultsTabLoaded(force = false){
@@ -1894,28 +1897,35 @@ async function runTest(){
 
     // The server-side run is complete; keep progress visible while its result is
     // loaded into the map, result grid, and session selectors.
-    currentSession = js.session;
-    currentResultsSession = currentSession;
+    const completedSession = js.session;
+    currentSession = completedSession;
     setText("#testStatus", "Loading completed test result…");
     const loadingLine = "[test] Processing complete. Loading map and result assets…";
     appendMiniLog("#testMiniLog", loadingLine);
     appendLog(loadingLine);
 
-    await applySessionToMap(currentSession);
+    await loadMapSession(completedSession);
     appendMiniLog("#testMiniLog", "[test] Map assets loaded. Rendering result thumbnails…");
     appendLog("[test] Map assets loaded. Rendering result thumbnails…");
+    const completedResultsLoad = beginResultsSessionLoad(completedSession);
     await Promise.all([
-      loadResultsPage(currentSession, 1),
-      loadResultsInfo(currentSession),
+      loadResultsPage(completedSession, 1, { signal: completedResultsLoad.controller.signal }),
+      loadResultsInfo(completedSession, {
+        signal: completedResultsLoad.controller.signal,
+        loadToken: completedResultsLoad.loadToken,
+      }),
     ]);
+    if(resultsSessionAbortController === completedResultsLoad.controller){
+      resultsSessionAbortController = null;
+    }
     appendMiniLog("#testMiniLog", "[test] Result images, metrics, and model data loaded. Refreshing session list…");
     appendLog("[test] Result images, metrics, and model data loaded. Refreshing session list…");
     
     await loadSessions(true);
     appendMiniLog("#testMiniLog", "[test] Session list refreshed. Test result is ready.");
     appendLog("[test] Session list refreshed. Test result is ready.");
-    $("#selResults").value = currentSession;
-    $("#selMapSession").value = currentSession;
+    $("#selResults").value = completedSession;
+    $("#selMapSession").value = completedSession;
     ok("test", "Testing completed.");
     setText("#testStatus", `Test complete. ${totalPreds} predictions.`);
     switchToTab("tab-results");
@@ -1939,38 +1949,62 @@ const RESULTS_PAGE_SIZE = 100;
 let currentManifest = [];
 let resultsPageState = { page: 1, pageCount: 0, pageSize: RESULTS_PAGE_SIZE, total: 0 };
 let resultsPageRequestToken = 0;
+let resultsSessionLoadToken = 0;
+let resultsSessionAbortController = null;
+let resultsPageAbortController = null;
 let currentResultsSession = null;
+
+function beginResultsSessionLoad(session){
+  resultsSessionAbortController?.abort();
+  resultsPageAbortController?.abort();
+  const controller = new AbortController();
+  const loadToken = ++resultsSessionLoadToken;
+  resultsSessionAbortController = controller;
+  currentResultsSession = session;
+  return { controller, loadToken };
+}
+
+function isCurrentResultsSessionLoad(session, loadToken, signal){
+  return !signal?.aborted
+    && session === currentResultsSession
+    && loadToken === resultsSessionLoadToken;
+}
 
 async function showResultsForSelected(){
   const session = $("#selResults").value;
   if(!session) return;
   currentSession = session;
-  currentResultsSession = session;
+  const { controller, loadToken } = beginResultsSessionLoad(session);
+  const signal = controller.signal;
   renderResultsInfoLoading();
   const grid = $("#resultsGrid");
   if(grid) grid.innerHTML = '<div class="mapListLoading"><span class="spinner" aria-hidden="true"></span><span>Loading images…</span></div>';
   try{
     const res = await fetch(
       `${api.sessionSummary}?session=${encodeURIComponent(session)}&include_manifest=false`,
-      { cache: 'no-store' },
+      { cache: 'no-store', signal },
     );
     const js = await res.json();
     if(!res.ok || !js.ok){
       throw new Error(js.detail || `Could not load result (${res.status}).`);
     }
-    if(session !== currentResultsSession) return;
+    if(!isCurrentResultsSessionLoad(session, loadToken, signal)) return;
     lastLoadedSessionSummary = js || null;
     rotatedImagesLookup = null;
     await Promise.all([
-      loadResultsPage(session, 1),
-      loadResultsInfo(session),
+      loadResultsPage(session, 1, { signal }),
+      loadResultsInfo(session, { signal, loadToken }),
     ]);
   }catch(error){
-    if(session !== currentResultsSession) return;
+    if(error?.name === 'AbortError' || !isCurrentResultsSessionLoad(session, loadToken, signal)) return;
     if(grid) grid.innerHTML = `<div class="muted">${escapeHtml(error.message || String(error))}</div>`;
     renderResultsInfoSection('resultsMetricsBody', null, 'Test metrics could not be loaded.');
     renderResultsInfoSection('resultsModelBody', null, 'Model data could not be loaded.');
     updateResultsPagination({ total: 0, page: 1, page_count: 0 });
+  }finally{
+    if(resultsSessionAbortController === controller){
+      resultsSessionAbortController = null;
+    }
   }
 }
 
@@ -1996,9 +2030,16 @@ function updateResultsPagination(payload){
   }
 }
 
-async function loadResultsPage(session, page = 1){
+async function loadResultsPage(session, page = 1, { signal: parentSignal = null } = {}){
   if(!session) return;
   const requestToken = ++resultsPageRequestToken;
+  resultsPageAbortController?.abort();
+  const controller = new AbortController();
+  resultsPageAbortController = controller;
+  const forwardAbort = () => controller.abort();
+  if(parentSignal?.aborted) controller.abort();
+  else parentSignal?.addEventListener('abort', forwardAbort, { once: true });
+  const signal = controller.signal;
   const grid = $("#resultsGrid");
   const detectedOnly = document.getElementById('chkShowOnlyDetections')?.checked === true;
   if(grid) grid.innerHTML = '<div class="mapListLoading"><span class="spinner" aria-hidden="true"></span><span>Loading images…</span></div>';
@@ -2012,7 +2053,7 @@ async function loadResultsPage(session, page = 1){
     });
     const response = await fetch(
       `/api/results/${encodeURIComponent(session)}/manifest?${query}`,
-      { cache: 'no-store' },
+      { cache: 'no-store', signal },
     );
     const payload = await response.json();
     if(!response.ok || !payload.ok){
@@ -2022,10 +2063,14 @@ async function loadResultsPage(session, page = 1){
     renderResultsGrid(Array.isArray(payload.items) ? payload.items : []);
     updateResultsPagination(payload);
   }catch(error){
+    if(error?.name === 'AbortError') return;
     if(requestToken !== resultsPageRequestToken || session !== currentResultsSession) return;
     currentManifest = [];
     if(grid) grid.innerHTML = `<div class="muted">${escapeHtml(error.message || String(error))}</div>`;
     updateResultsPagination({ total: 0, page: 1, page_count: 0 });
+  }finally{
+    parentSignal?.removeEventListener('abort', forwardAbort);
+    if(resultsPageAbortController === controller) resultsPageAbortController = null;
   }
 }
 
@@ -2540,12 +2585,13 @@ function findImageRecordForFeature(props){
 
 let anomaliesProp = 'class_name';  // current property to color by
 
-async function loadGeoJSON(url){
+async function loadGeoJSON(url, { signal = null, assertCurrent = null } = {}){
   // A result name may be rerun in place. Never reuse an older prediction
   // response against freshly generated image placement metadata.
-  const res = await fetch(url, { cache: 'no-store' });
+  const res = await fetch(url, { cache: 'no-store', signal });
   if (!res.ok) throw new Error(`Failed to load prediction GeoJSON (${res.status})`);
   const gj = await res.json();
+  assertCurrent?.();
   appendTestLoadLog(`Prediction GeoJSON parsed (${Array.isArray(gj?.features) ? gj.features.length : 0} feature(s)). Rendering map layer…`);
 
   const base = overlayRegistry["Predictions"]?.style || {
@@ -2799,7 +2845,8 @@ function setImagesSectionLoading(message){
   list.innerHTML = `<li class="mapListLoading"><span class="spinner" aria-hidden="true"></span><span>${escapeHtml(message)}</span></li>`;
 }
 
-function waitForMapTiles(layers, timeoutMs = 10000){
+function waitForMapTiles(layers, timeoutMs = 10000, signal = null){
+  if(signal?.aborted) return Promise.resolve();
   const pending = (layers || []).map(layer => new Promise(resolve => {
     if(!layer?.once) return resolve();
     const finish = () => resolve();
@@ -2810,6 +2857,7 @@ function waitForMapTiles(layers, timeoutMs = 10000){
   return Promise.race([
     Promise.all(pending),
     new Promise(resolve => setTimeout(resolve, timeoutMs)),
+    new Promise(resolve => signal?.addEventListener('abort', resolve, { once: true })),
   ]);
 }
 
@@ -2819,7 +2867,48 @@ function appendTestLoadLog(message){
   appendLog(line);
 }
 
-async function applySessionToMap(sessionName){
+function makeAbortError(){
+  try { return new DOMException('The previous session load was cancelled.', 'AbortError'); }
+  catch(_) {
+    const error = new Error('The previous session load was cancelled.');
+    error.name = 'AbortError';
+    return error;
+  }
+}
+
+function isCurrentMapSessionLoad(sessionName, loadToken, signal){
+  return !signal?.aborted
+    && loadToken === mapSessionLoadToken
+    && sessionName === currentMapSession;
+}
+
+function assertCurrentMapSessionLoad(sessionName, loadToken, signal){
+  if(!isCurrentMapSessionLoad(sessionName, loadToken, signal)) throw makeAbortError();
+}
+
+async function loadMapSession(sessionName){
+  if(!sessionName) return;
+  mapSessionAbortController?.abort();
+  const controller = new AbortController();
+  const loadToken = ++mapSessionLoadToken;
+  mapSessionAbortController = controller;
+  currentMapSession = sessionName;
+  try{
+    await applySessionToMap(sessionName, { signal: controller.signal, loadToken });
+  }catch(error){
+    if(error?.name !== 'AbortError'){
+      console.error(`Failed to load map session ${sessionName}:`, error);
+    }
+  }finally{
+    if(loadToken === mapSessionLoadToken && mapSessionAbortController === controller){
+      mapSessionAbortController = null;
+    }
+  }
+}
+
+async function applySessionToMap(sessionName, { signal = null, loadToken = mapSessionLoadToken } = {}){
+  const assertCurrent = () => assertCurrentMapSessionLoad(sessionName, loadToken, signal);
+  assertCurrent();
   mapAssetCacheVersion = `${sessionName}-${Date.now()}`;
   setMapSectionLoading(true, "Loading result map…");
   setImagesSectionLoading("Checking geospatial imagery…");
@@ -2829,9 +2918,13 @@ async function applySessionToMap(sessionName){
 
   // 1) session summary (urls for geojsons)
   appendTestLoadLog("Requesting result summary and asset catalog…");
-  const res = await fetch(`/api/session_summary?session=${encodeURIComponent(sessionName)}`, { cache: 'no-store' });
+  const res = await fetch(`/api/session_summary?session=${encodeURIComponent(sessionName)}`, {
+    cache: 'no-store',
+    signal,
+  });
   if (!res.ok) { console.warn('session_summary failed'); return; }
   const sum = await res.json();
+  assertCurrent();
   appendTestLoadLog("Session summary loaded. Loading detection polygons…");
   // cache the session summary so loadImagesCatalog can prefer rotated_images when available
   lastLoadedSessionSummary = sum || null;
@@ -2864,8 +2957,12 @@ async function applySessionToMap(sessionName){
   // 2) anomalies polygons (load regardless)
   if (anomaliesUrl){
     setMapSectionLoading(true, "Loading detection polygons…");
-    try { await loadGeoJSON(anomaliesUrl); }
-    catch(e){ console.warn('anomalies fetch failed:', e); }
+    try { await loadGeoJSON(anomaliesUrl, { signal, assertCurrent }); }
+    catch(e){
+      if(e?.name === 'AbortError') throw e;
+      console.warn('anomalies fetch failed:', e);
+    }
+    assertCurrent();
     appendTestLoadLog("Detection polygons loaded. Checking orthophoto tiles…");
   }
 
@@ -2873,9 +2970,16 @@ async function applySessionToMap(sessionName){
   setMapSectionLoading(true, "Checking for an orthophoto…");
   let tiles = null;
   try{
-    const r = await fetch(`/api/session_tiles?session=${encodeURIComponent(sessionName)}`, { cache:'no-store' });
+    const r = await fetch(`/api/session_tiles?session=${encodeURIComponent(sessionName)}`, {
+      cache:'no-store',
+      signal,
+    });
     if (r.ok) tiles = await r.json();
-  }catch(e){ console.warn('session_tiles failed:', e); }
+  }catch(e){
+    if(e?.name === 'AbortError') throw e;
+    console.warn('session_tiles failed:', e);
+  }
+  assertCurrent();
 
   const hasTifTiles = !!(tiles?.ok && Array.isArray(tiles.layers) && tiles.layers.length);
   const isGeneratedMosaic = sum?.mosaic_created === true;
@@ -2893,11 +2997,13 @@ async function applySessionToMap(sessionName){
     TIF_TILE_BOUNDS = b.firstBounds;
 
     // show controller row inside Images list (replaces normal images there)
-    await loadImagesCatalog(sessionName, imagesUrl);
+    await loadImagesCatalog(sessionName, imagesUrl, { signal, assertCurrent });
+    assertCurrent();
     appendTestLoadLog(`${isGeneratedMosaic ? 'Mosaic' : 'Orthophoto'} tile catalog loaded. Waiting for map tiles…`);
     installTilesIntoImagesList(sessionName, tiles.layers, false);
 
-    await waitForMapTiles(b.layers);
+    await waitForMapTiles(b.layers, 10000, signal);
+    assertCurrent();
 
     // fit to raster on first load
     if (b.firstBounds){
@@ -2907,7 +3013,8 @@ async function applySessionToMap(sessionName){
     updateMapDetectionFilterVisibility(false);
     updateImageListButtonsVisibility(false);
     // Fallback: point markers loaded from images.geojson
-    await loadImagesCatalog(sessionName, imagesUrl);
+    await loadImagesCatalog(sessionName, imagesUrl, { signal, assertCurrent });
+    assertCurrent();
     appendTestLoadLog("Image catalog loaded. Fitting map to result locations…");
     // Fit to camera locations (image markers) after all layers loaded
     const bounds = L.latLngBounds([]);
@@ -2927,7 +3034,7 @@ async function applySessionToMap(sessionName){
   refreshLayersPanel();
   appendTestLoadLog("Map assets loaded.");
   } finally {
-    setMapSectionLoading(false);
+    if(isCurrentMapSessionLoad(sessionName, loadToken, signal)) setMapSectionLoading(false);
   }
 }
 
@@ -3131,7 +3238,8 @@ function escapeHtml(s) {
 
 
 
-async function loadImagesCatalog(sessionName, imagesUrl){
+async function loadImagesCatalog(sessionName, imagesUrl, { signal = null, assertCurrent = null } = {}){
+  assertCurrent?.();
   imageCatalog = [];
   clearImageOverlays();
   const listEl = document.getElementById('imagesList');
@@ -3143,7 +3251,10 @@ async function loadImagesCatalog(sessionName, imagesUrl){
   }
 
   try {
-    const gj = await (await fetch(imagesUrl, { cache: 'no-store' })).json();
+    const response = await fetch(imagesUrl, { cache: 'no-store', signal });
+    if(!response.ok) throw new Error(`Failed to load image GeoJSON (${response.status})`);
+    const gj = await response.json();
+    assertCurrent?.();
     // Retain the loaded collection for map summary/status rendering.
     lastLoadedImagesGJ = gj;
 
@@ -3267,8 +3378,10 @@ async function loadImagesCatalog(sessionName, imagesUrl){
       });
     }
 
+    assertCurrent?.();
     applyMapDetectionFilter();
   } catch (e) {
+    if(e?.name === 'AbortError') throw e;
     console.warn('images_geojson parse failed:', e);
     if (listEl) listEl.innerHTML = '<li class="err">Failed to load images</li>';
   }
@@ -3596,7 +3709,7 @@ function connectLogs(){
 async function refreshMapSessionSelected(){
   const session = $("#selMapSession").value;
   if(!session) return;
-  await applySessionToMap(session);
+  await loadMapSession(session);
 }
 
 
@@ -4610,7 +4723,10 @@ function deriveRunNameFromModelName(name) {
 }
 
 // Fetch metrics + model meta for a session, then render
-async function loadResultsInfo(sessionName) {
+async function loadResultsInfo(
+  sessionName,
+  { signal = null, loadToken = resultsSessionLoadToken } = {},
+) {
   const predictions_title = document.getElementById("predictionsTitle");
   renderResultsInfoLoading();
 
@@ -4618,10 +4734,15 @@ async function loadResultsInfo(sessionName) {
 
   // 1) metrics (required for the panel to be useful)
   try {
-    const r = await fetch(`/api/results/${encodeURIComponent(sessionName)}/metrics`, { cache: "no-store" });
+    const r = await fetch(`/api/results/${encodeURIComponent(sessionName)}/metrics`, {
+      cache: "no-store",
+      signal,
+    });
     if (r.ok) metrics = await r.json();
-  } catch {}
-  if(sessionName !== currentResultsSession) return;
+  } catch(error) {
+    if(error?.name === 'AbortError') return;
+  }
+  if(!isCurrentResultsSessionLoad(sessionName, loadToken, signal)) return;
   renderResultsInfoSection('resultsMetricsBody', metrics, 'Test metrics are not available.');
   if(predictions_title){
     predictions_title.textContent = metrics?.total_detections != null
@@ -4634,11 +4755,16 @@ async function loadResultsInfo(sessionName) {
     const runName = deriveRunNameFromModelName(metrics.model_name);
     if (runName) {
       try {
-        const r2 = await fetch(`/api/runs/${encodeURIComponent(runName)}/meta`, { cache: "no-store" });
+        const r2 = await fetch(`/api/runs/${encodeURIComponent(runName)}/meta`, {
+          cache: "no-store",
+          signal,
+        });
         if (r2.ok) meta = await r2.json();
-      } catch {}
+      } catch(error) {
+        if(error?.name === 'AbortError') return;
+      }
     }
   }
-  if(sessionName !== currentResultsSession) return;
+  if(!isCurrentResultsSessionLoad(sessionName, loadToken, signal)) return;
   renderResultsInfoSection('resultsModelBody', meta, 'Model data is not available.');
 }
