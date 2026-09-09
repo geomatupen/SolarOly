@@ -59,7 +59,7 @@
     source: { label: "Source", color: "#38bdf8", weight: 1, fillOpacity: 0.08 },
     combined: { label: "Combined", color: "#f59e0b", weight: 2, fillOpacity: 0.13 },
     regularized: { label: "Regularized", color: "#22c55e", weight: 2, fillOpacity: 0.16 },
-    solar_rows: { label: "Rows (editable)", color: "#ef4444", weight: 3, fillOpacity: 0.05 },
+    solar_rows: { label: "Rows", color: "#ef4444", weight: 3, fillOpacity: 0.05 },
     panel_reference: { label: "Panel reference", color: "#14b8a6", weight: 2, fillOpacity: 0.08 },
     segmentation_regularized_reference: { label: "Final regularized panels", color: "#22c55e", weight: 2, fillOpacity: 0.10 },
     segmentation_rows_reference: { label: "Final rows (read-only)", color: "#ef4444", weight: 3, fillOpacity: 0.035 },
@@ -2286,6 +2286,7 @@
       ? [...(state.editing.dissolveSelection || [])]
       : [];
     let dissolvedCount = 0;
+    let dissolvedSnapshot = null;
     if (existingSelection.length >= 2) {
       const editing = state.editing;
       const button = byId("ppMergePolygons");
@@ -2314,7 +2315,9 @@
         created.layer.eachLayer(layer => editing.item.layer.addLayer(layer));
         editing.item.count = editing.item.layer.getLayers().length;
         dissolvedCount = existingSelection.length;
-        recordEditState(`${dissolvedCount} polygons dissolved. You can undo or redo this change.`);
+        // Commit this transaction after the dissolve tool has been rebound. That
+        // keeps its Undo state from being overwritten during the tool reset.
+        dissolvedSnapshot = JSON.parse(JSON.stringify(editing.item.layer.toGeoJSON()));
       } catch (error) {
         byId("ppEditStatus").textContent = error.message;
         return;
@@ -2348,9 +2351,18 @@
     byId("ppMap").classList.add("dissolveMode");
     byId("ppMergePolygons").classList.add("active");
     setIconButtonLabel("ppMergePolygons", "Dissolve polygons");
-    byId("ppEditStatus").textContent = dissolvedCount
-      ? `${dissolvedCount} polygons dissolved. Select more polygons to dissolve, or save the layer.`
-      : "Dissolve mode: select at least two polygons, then click Dissolve polygons again.";
+    if (dissolvedSnapshot) {
+      const editing = state.editing;
+      if (JSON.stringify(dissolvedSnapshot) !== JSON.stringify(editing.history[editing.historyIndex])) {
+        editing.history.splice(editing.historyIndex + 1);
+        editing.history.push(dissolvedSnapshot);
+        if (editing.history.length > 12) editing.history.splice(1, editing.history.length - 12);
+        editing.historyIndex = editing.history.length - 1;
+      }
+      updateEditHistoryControls(`${dissolvedCount} polygons dissolved. You can undo or redo this change.`);
+    } else {
+      byId("ppEditStatus").textContent = "Dissolve mode: select at least two polygons, then click Dissolve polygons again.";
+    }
   }
 
   function restoreEditHistory(targetIndex) {

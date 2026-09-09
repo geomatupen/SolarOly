@@ -1346,7 +1346,7 @@
           "segmentation_rows_reference",
           layer.rows_url,
           null,
-          "Final rows (visual reference)",
+          "Final rows (read-only)",
           true,
           layer.rows_mtime,
           null,
