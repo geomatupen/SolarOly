@@ -68,7 +68,7 @@
         const rowsOption = addOption(
           assignmentSelect,
           `${workflow.id}:rows`,
-          `Use edited Rows · ${created}${latest}`,
+          `Use Rows and Regularized panels · ${created}${latest}`,
           workflow.id,
         );
         rowsOption.dataset.useRows = "true";
@@ -76,7 +76,7 @@
       const noRowsOption = addOption(
         assignmentSelect,
         `${workflow.id}:no-rows`,
-        `Skip Rows — use row ID 0000 · ${created}${latest}`,
+        `Skip Rows and use Regularized panels only · ${created}${latest}`,
         workflow.id,
       );
       noRowsOption.dataset.useRows = "false";
