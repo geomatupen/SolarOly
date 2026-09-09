@@ -552,6 +552,7 @@
             <div class="postprocessStepNumber">4</div>
             <div class="postprocessStepBody">
               <h3>Assign IDs</h3>
+              <button id="ppPanelIdsInfo" type="button" class="infoBtn postprocessStepTitleAction" aria-label="How panel ID assignment works" aria-haspopup="dialog" aria-controls="ppPanelIdsInfoModal">i</button>
               <p class="muted tiny">Assign a unique ID to every valid Regularized panel. Use edited Rows for IDs such as 1000-A1; panels outside those rows receive row ID 0000. You can also skip Rows and assign all panels to 0000.</p>
               <div class="postprocessFields">
                 <div>
@@ -1143,6 +1144,27 @@
     </div>
   </div>
 
+  <div id="ppPanelIdsInfoModal" class="modal hidden workflowInfoModal" role="dialog" aria-modal="true" aria-labelledby="ppPanelIdsInfoTitle">
+    <div class="modalContent workflowInfoModalContent">
+      <div class="modalHeader">
+        <h3 id="ppPanelIdsInfoTitle">How panel ID assignment works</h3>
+        <button id="ppPanelIdsInfoClose" class="iconBtn" type="button" aria-label="Close">&times;</button>
+      </div>
+      <div class="modalBody infoBody workflowInfoBody">
+        <p><strong>Every valid panel receives a unique ID.</strong> Assigning IDs does not move or reshape panels or rows.</p>
+        <ol>
+          <li>Edited Rows are numbered in map reading order, starting at <code>1000</code>.</li>
+          <li>Inner panel rows use letters <code>A</code>, <code>B</code>, <code>C</code>, and so on. Panels are numbered within each inner row, producing IDs such as <code>1000-A1</code>, <code>1000-A2</code>, and <code>1000-B1</code>.</li>
+          <li>A panel overlapping multiple Rows is assigned to the Row with the greatest overlap.</li>
+          <li>Panels outside every edited Row receive <code>row_id: "0000"</code> and IDs such as <code>0000-P000001</code>. The letter <code>P</code> identifies a standalone panel, not an inner panel row.</li>
+          <li>If Build rows is skipped, all valid panels receive the reserved row ID <code>0000</code>.</li>
+        </ol>
+        <p>Reassigning IDs may change existing panel references. Any finalized anomaly assignment linked to these panels is removed and must be run again.</p>
+      </div>
+      <div class="modalFooter"><button id="ppPanelIdsInfoCloseFooter" class="secondary" type="button">Close</button></div>
+    </div>
+  </div>
+
   <div id="ppActionConfirmModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="ppActionConfirmTitle">
     <div class="modalContent postprocessActionConfirmContent">
       <div class="modalHeader">
@@ -1640,7 +1662,7 @@
   <script src="js/main.js?v=20260908c"></script>
   <script src="js/postprocess-layer-move.js?v=20260902e"></script>
   <script src="js/postprocess.js?v=20260909b"></script>
-  <script src="js/postprocess_segmentation.js?v=20260909b"></script>
+  <script src="js/postprocess_segmentation.js?v=20260909c"></script>
   <script src="js/postprocess_anomaly.js?v=20260909b"></script>
   <script>
     // Display active project name in header

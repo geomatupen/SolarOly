@@ -214,6 +214,21 @@
   }
 
   function init() {
+    const panelIdsInfoModal = byId("ppPanelIdsInfoModal");
+    const closePanelIdsInfo = () => {
+      panelIdsInfoModal?.classList.remove("show");
+      panelIdsInfoModal?.classList.add("hidden");
+    };
+    byId("ppPanelIdsInfo")?.addEventListener("click", () => {
+      panelIdsInfoModal?.classList.remove("hidden");
+      panelIdsInfoModal?.classList.add("show");
+      byId("ppPanelIdsInfoClose")?.focus();
+    });
+    byId("ppPanelIdsInfoClose")?.addEventListener("click", closePanelIdsInfo);
+    byId("ppPanelIdsInfoCloseFooter")?.addEventListener("click", closePanelIdsInfo);
+    panelIdsInfoModal?.addEventListener("click", event => {
+      if (event.target === panelIdsInfoModal) closePanelIdsInfo();
+    });
     byId("ppBuildHierarchy")?.addEventListener("click", buildHierarchy);
     byId("ppSkipHierarchy")?.addEventListener("click", skipHierarchy);
     byId("ppAssignIds")?.addEventListener("click", assignIds);
