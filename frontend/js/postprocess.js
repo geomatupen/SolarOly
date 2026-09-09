@@ -753,7 +753,11 @@
       preferCanvas: true,
       zoomControl: true,
       layers: [street],
+      // Geoman runs in opt-in mode, so the map must opt in as well as each
+      // editable layer. Without this, layer.pm exists but map.pm does not.
+      pmIgnore: false,
     }).setView([48.8566, 2.3522], 5);
+    ensureGeomanMap();
     const rasterPane = state.map.createPane("ppRasterPane");
     rasterPane.style.zIndex = "250";
     const referencePane = state.map.createPane("ppReferencePane");
@@ -782,6 +786,22 @@
       },
     });
     return state.map;
+  }
+
+  function ensureGeomanMap() {
+    if (!state.map || !window.L?.PM) return false;
+    state.map.options.pmIgnore = false;
+    if (!state.map.pm) {
+      try { window.L.PM.reInitLayer(state.map); } catch (error) {
+        console.error("Could not initialize post-process map editing.", error);
+      }
+    }
+    if (state.map.pm && !state.map.pm.globalOptions) {
+      try { state.map.pm.setGlobalOptions({}); } catch (error) {
+        console.error("Could not initialize post-process map editing options.", error);
+      }
+    }
+    return Boolean(state.map.pm);
   }
 
   function geoJsonFeatureCenter(feature) {
@@ -1983,6 +2003,16 @@
     updateEditHistoryControls(message);
   }
 
+  function commitEditSnapshot(snapshot, message) {
+    const editing = state.editing;
+    if (!editing) return;
+    editing.history.splice(editing.historyIndex + 1);
+    editing.history.push(JSON.parse(JSON.stringify(snapshot)));
+    if (editing.history.length > 12) editing.history.splice(1, editing.history.length - 12);
+    editing.historyIndex = editing.history.length - 1;
+    updateEditHistoryControls(message);
+  }
+
   function scheduleEditHistory() {
     if (!state.editing) return;
     if (state.editing.historyTimer) window.clearTimeout(state.editing.historyTimer);
@@ -2108,9 +2138,12 @@
   }
 
   function prepareGeomanLayer(layer) {
-    if (!layer) return false;
+    if (!layer || !ensureGeomanMap()) return false;
     layer.options = layer.options || {};
     layer.options.pmIgnore = false;
+    // Preserve an editor that Geoman already initialized when the layer was
+    // added to the opted-in map. Reinitialize only genuinely missing editors.
+    if (layer.pm?.enable) return true;
     try {
       window.L.PM?.reInitLayer(layer);
     } catch (error) {
@@ -2282,6 +2315,10 @@
 
   async function enablePolygonDissolving() {
     if (!state.editing) return;
+    if (!ensureGeomanMap()) {
+      byId("ppEditStatus").textContent = "Map editing support did not initialize. Reload the page and try again.";
+      return;
+    }
     const existingSelection = state.editing.mode === "dissolve"
       ? [...(state.editing.dissolveSelection || [])]
       : [];
@@ -2307,6 +2344,20 @@
           },
         );
         if (state.editing !== editing) return;
+        dissolvedCount = existingSelection.length;
+        const selectedLayers = new Set(existingSelection);
+        dissolvedSnapshot = {
+          type: "FeatureCollection",
+          features: [
+            ...editing.item.layer.getLayers()
+              .filter(layer => !selectedLayers.has(layer))
+              .map(layer => layer.toGeoJSON()),
+            payload.feature,
+          ],
+        };
+        // Record the transaction before Leaflet/Geoman layer lifecycle hooks
+        // run, so Undo remains available even if repainting the result fails.
+        commitEditSnapshot(dissolvedSnapshot, `${dissolvedCount} polygons dissolved. You can undo or redo this change.`);
         for (const layer of existingSelection) editing.item.layer.removeLayer(layer);
         const created = createPreviewGeoJsonLayer(editing.stage, {
           type: "FeatureCollection",
@@ -2314,10 +2365,6 @@
         });
         created.layer.eachLayer(layer => editing.item.layer.addLayer(layer));
         editing.item.count = editing.item.layer.getLayers().length;
-        dissolvedCount = existingSelection.length;
-        // Commit this transaction after the dissolve tool has been rebound. That
-        // keeps its Undo state from being overwritten during the tool reset.
-        dissolvedSnapshot = JSON.parse(JSON.stringify(editing.item.layer.toGeoJSON()));
       } catch (error) {
         byId("ppEditStatus").textContent = error.message;
         return;
@@ -2353,13 +2400,12 @@
     setIconButtonLabel("ppMergePolygons", "Dissolve polygons");
     if (dissolvedSnapshot) {
       const editing = state.editing;
-      if (JSON.stringify(dissolvedSnapshot) !== JSON.stringify(editing.history[editing.historyIndex])) {
-        editing.history.splice(editing.historyIndex + 1);
-        editing.history.push(dissolvedSnapshot);
-        if (editing.history.length > 12) editing.history.splice(1, editing.history.length - 12);
-        editing.historyIndex = editing.history.length - 1;
-      }
       updateEditHistoryControls(`${dissolvedCount} polygons dissolved. You can undo or redo this change.`);
+      // Keep the final control state authoritative after the async button event
+      // and the dissolve-mode handlers have fully settled.
+      window.requestAnimationFrame(() => {
+        if (state.editing === editing) updateEditHistoryControls();
+      });
     } else {
       byId("ppEditStatus").textContent = "Dissolve mode: select at least two polygons, then click Dissolve polygons again.";
     }
