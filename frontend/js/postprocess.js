@@ -2099,24 +2099,43 @@
     byId("ppEditPanel").hidden = false;
     byId("ppEditLayerName").textContent = item.label;
     byId("ppEditLayerIdentity").textContent = `Workflow ID: ${state.workflowId} · Stage: ${stage}`;
-    byId("ppEditStatus").textContent = "Only this highlighted layer is editable. Other layers are temporarily hidden and locked.";
+    byId("ppEditStatus").textContent = "Only this highlighted layer is editable. Choose an editing tool to begin.";
     byId("ppUndoEdits").disabled = true;
     byId("ppRedoEdits").disabled = true;
     byId("ppSaveEdits").disabled = true;
     applyEditingEmphasis();
     renderPreviewLayers();
-    enableVertexEditing();
+  }
+
+  function prepareGeomanLayer(layer) {
+    if (!layer) return false;
+    layer.options = layer.options || {};
+    layer.options.pmIgnore = false;
+    try {
+      window.L.PM?.reInitLayer(layer);
+    } catch (error) {
+      console.error("Could not initialize polygon editing.", error);
+    }
+    return Boolean(layer.pm?.enable);
+  }
+
+  function geomanVertexCount(layer) {
+    const countMarkers = value => {
+      if (!value) return 0;
+      if (Array.isArray(value)) return value.reduce((total, entry) => total + countMarkers(entry), 0);
+      return typeof value.getLatLng === "function" ? 1 : 0;
+    };
+    return countMarkers(layer?.pm?._markers);
   }
 
   function enableVertexEditing() {
     if (!state.editing) return;
     disableEditingTools();
     state.editing.mode = "vertices";
+    prepareGeomanLayer(state.editing.item.layer);
     let supported = false;
     state.editing.item.layer.eachLayer(layer => {
-      layer.options.pmIgnore = false;
-      try { window.L.PM?.reInitLayer(layer); } catch (_) {}
-      if (layer.pm?.enable) {
+      if (prepareGeomanLayer(layer)) {
         supported = true;
         const handler = event => {
           if (event.originalEvent) window.L.DomEvent.stop(event.originalEvent);
@@ -2142,13 +2161,24 @@
           byId("ppEditStatus").textContent = "Polygon selected · loading vertex handles…";
           window.requestAnimationFrame(() => {
             if (state.editing?.mode !== "vertices" || state.editing.selectedLayer !== selectedLayer) return;
-            selectedLayer.pm.enable({ allowSelfIntersection: false, snappable: true });
-            const markerCount = selectedLayer.pm?._markers?.flat?.(Infinity)?.length
-              || selectedLayer.pm?._markers?.length
-              || 0;
-            byId("ppEditStatus").textContent = markerCount
-              ? `Polygon selected · ${markerCount} vertex handles. Drag a handle to edit.`
-              : "Polygon selected, but vertex handles could not be created.";
+            try {
+              // Snapping every handle against a layer containing thousands of
+              // panels can block marker creation long enough to appear broken.
+              // Vertex editing itself does not require snapping.
+              if (!prepareGeomanLayer(selectedLayer)) throw new Error("Leaflet-Geoman did not initialize this polygon.");
+              selectedLayer.pm.enable({ allowSelfIntersection: false, snappable: false });
+              selectedLayer.bringToFront?.();
+              window.requestAnimationFrame(() => {
+                if (state.editing?.mode !== "vertices" || state.editing.selectedLayer !== selectedLayer) return;
+                const markerCount = geomanVertexCount(selectedLayer);
+                byId("ppEditStatus").textContent = markerCount
+                  ? `Polygon selected · ${markerCount} vertex handles. Drag a handle to edit.`
+                  : "Polygon selected, but vertex handles could not be created. Try another polygon or reload the page.";
+              });
+            } catch (error) {
+              console.error("Could not create vertex handles.", error);
+              byId("ppEditStatus").textContent = `Could not create vertex handles: ${error.message || "unknown editing error"}`;
+            }
           });
         };
         layer.on("click", handler);
