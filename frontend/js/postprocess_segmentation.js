@@ -3,6 +3,8 @@
 
   const byId = id => document.getElementById(id);
   const api = () => window.PostprocessWorkspace;
+  const explicitAssignmentModes = new Map();
+  const assignmentModeKey = (resultId, workflowId) => `${resultId || ""}::${workflowId || ""}`;
 
   function addOption(select, value, label, workflowId = "") {
     const option = document.createElement("option");
@@ -52,7 +54,6 @@
     byId("ppBuildHierarchy").disabled = hierarchyUnavailable;
     byId("ppSkipHierarchy").disabled = hierarchyUnavailable;
     const assignmentSelect = byId("ppAssignmentSource");
-    const previousAssignment = assignmentSelect.value;
     const assignmentWorkflows = context.workflows.filter(workflow =>
       workflow.workflow_kind !== "anomaly" && hierarchySource(workflow, context.geojsonFiles)
     );
@@ -80,12 +81,15 @@
       );
       noRowsOption.dataset.useRows = "false";
     });
-    if (previousAssignment && [...assignmentSelect.options].some(option => option.value === previousAssignment)) {
-      assignmentSelect.value = previousAssignment;
-    } else if (assignmentSelect.options.length > 1) {
-      const latestWorkflow = assignmentWorkflows[0];
-      const preferredUseRows = latestWorkflow?.assignment_mode !== "no_rows"
-        && Boolean(latestWorkflow?.outputs?.solar_rows?.path);
+    if (assignmentSelect.options.length > 1) {
+      const latestWorkflow = assignmentWorkflows.find(workflow => workflow.id === context.workflowId)
+        || assignmentWorkflows[0];
+      const explicitMode = explicitAssignmentModes.get(
+        assignmentModeKey(context.resultId, latestWorkflow?.id),
+      );
+      const preferredUseRows = explicitMode == null
+        ? Boolean(latestWorkflow?.outputs?.solar_rows?.path)
+        : explicitMode;
       const preferred = [...assignmentSelect.options].find(option =>
         option.dataset.workflowId === latestWorkflow?.id
         && option.dataset.useRows === String(preferredUseRows)
@@ -126,6 +130,7 @@
       if (!confirmed) return;
     }
     const inputPath = select.value;
+    explicitAssignmentModes.delete(assignmentModeKey(context.resultId, workflowId));
     byId("ppBuildHierarchy").disabled = true;
     workspace.setMessage("Starting row generation…");
     try {
@@ -201,6 +206,7 @@
       option.dataset.workflowId === workflowId && option.dataset.useRows === "false"
     );
     if (!noRowsOption) return;
+    explicitAssignmentModes.set(assignmentModeKey(workspace.getContext().resultId, workflowId), false);
     assignmentSelect.value = noRowsOption.value;
     assignmentSelect.disabled = false;
     byId("ppAssignIds").disabled = false;
@@ -239,7 +245,14 @@
     });
     byId("ppAssignmentSource")?.addEventListener("change", event => {
       byId("ppAssignIds").disabled = !event.target.value;
-      const workflowId = event.target.selectedOptions[0]?.dataset.workflowId;
+      const selectedOption = event.target.selectedOptions[0];
+      const workflowId = selectedOption?.dataset.workflowId;
+      if (workflowId && selectedOption.dataset.useRows) {
+        explicitAssignmentModes.set(
+          assignmentModeKey(api()?.getContext()?.resultId, workflowId),
+          selectedOption.dataset.useRows === "true",
+        );
+      }
       if (workflowId) api()?.selectWorkflow(workflowId);
     });
     document.addEventListener("postprocess:data", event => refresh(event.detail));
