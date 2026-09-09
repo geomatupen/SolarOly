@@ -1993,6 +1993,9 @@
         panelLayersLoaded = false;
         panelLayersJobKey = "";
         loadedPanelReferenceKey = "";
+        // Panel-ID assignment can invalidate an existing final anomaly output.
+        // Reload the anomaly workflow instead of restoring that stale mode.
+        api()?.invalidateCachedMode("anomaly");
         return;
       }
       if (event.detail.context?.mode !== "anomaly"

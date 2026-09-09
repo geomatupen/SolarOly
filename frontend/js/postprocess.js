@@ -1106,7 +1106,17 @@
     state.previewLayers = cached.previewLayers;
     state.referenceLayers = cached.referenceLayers;
     const result = byId("ppResult");
-    if ([...result.options].some(option => option.value === cached.resultId)) result.value = cached.resultId;
+    if (state.currentJob && cached.resultId) {
+      // Each job mode has its own snapshot result. The internal selector only
+      // contains the currently loaded mode, so rebuild it when restoring the
+      // other cached mode instead of retaining the previous mode's result ID.
+      result.replaceChildren();
+      addOption(result, cached.resultId, cached.resultId);
+      result.value = cached.resultId;
+      result.disabled = true;
+    } else if ([...result.options].some(option => option.value === cached.resultId)) {
+      result.value = cached.resultId;
+    }
     const source = byId("ppGeojson");
     source.replaceChildren();
     addOption(source, "", "Select a GeoJSON…");
