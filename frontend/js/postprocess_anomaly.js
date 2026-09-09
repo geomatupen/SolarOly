@@ -1270,7 +1270,7 @@
           binding.workflow_id,
         );
         const panels = status.assignment_stats ? status.outputs?.regularized : null;
-        const rows = status.outputs?.solar_rows;
+        const rows = status.assignment_mode === "no_rows" ? null : status.outputs?.solar_rows;
         panelLayers = panels?.url ? [{
           result_id: source.workspace_result_id,
           workflow_id: status.id,
@@ -1359,7 +1359,7 @@
         ? "Using uploaded identified panels. Rows are optional and are not available for this source."
         : layer.rows_url
         ? "Using this job’s final regularized panels and rows as read-only references."
-        : "Using this job’s final regularized panels. Final rows will appear after panel and row IDs are assigned in Segmentation.";
+        : "Using this job’s identified panels without a Rows layer. Panels without a row use row ID 0000.";
     } catch (error) {
       loadedPanelReferenceKey = "";
       byId("ppPanelReferenceStatus").textContent = `Could not load final segmentation references: ${error.message}`;
@@ -1450,13 +1450,13 @@
     panelWarning.hidden = Boolean(panelLayer);
     panelWarning.textContent = panelLayer
       ? ""
-      : "No identified panel polygons are available. Complete all Segmentation steps to assign panel IDs, or upload a panel GeoJSON and select its unique ID field below.";
+      : "No identified panel polygons are available. Complete the Segmentation ID assignment step, with or without Rows, or upload a panel GeoJSON and select its unique ID field below.";
     byId("ppPanelReferenceStatus").textContent = panelLayer
       ? panelLayer.stage === "uploaded_panels"
         ? "Using uploaded identified panels. Rows are optional."
         : panelLayer.rows_url
         ? "Using this job’s final regularized panels and rows as read-only references."
-        : "Using this job’s final regularized panels. Final rows will appear after panel and row IDs are assigned in Segmentation."
+        : "Using this job’s identified panels without a Rows layer. Panels without a row use row ID 0000."
       : panelLayersLoaded
         ? "Identified panels are unavailable. Complete Segmentation or upload a panel GeoJSON in Step 4."
         : "Loading this job’s final regularized panels…";

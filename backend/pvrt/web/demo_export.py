@@ -333,7 +333,12 @@ def create_solar_demo_export(job_dir: Path, sessions_dir: Path, *, replace: bool
     anomaly_workspace, anomaly_status = _bound_workflow(job_dir, job, "anomaly")
 
     panels_path = _workspace_output(segmentation_workspace, segmentation_status, "regularized")
-    rows_path = _workspace_output(segmentation_workspace, segmentation_status, "solar_rows")
+    rows_output = (segmentation_status.get("outputs") or {}).get("solar_rows") or {}
+    rows_path = (
+        _workspace_output(segmentation_workspace, segmentation_status, "solar_rows")
+        if rows_output.get("path") and segmentation_status.get("assignment_mode") != "no_rows"
+        else None
+    )
     anomalies_path = _workspace_output(anomaly_workspace, anomaly_status, "associated")
 
     anomaly_result_id = str(((job.get("sources") or {}).get("anomaly") or {}).get("result_id") or "")
@@ -360,7 +365,18 @@ def create_solar_demo_export(job_dir: Path, sessions_dir: Path, *, replace: bool
     try:
         with zipfile.ZipFile(temporary, "w") as archive:
             archive.write(panels_path, "vector/solar_panels.geojson", compress_type=zipfile.ZIP_DEFLATED)
-            archive.write(rows_path, "vector/solar_rows.geojson", compress_type=zipfile.ZIP_DEFLATED)
+            if rows_path is not None:
+                archive.write(rows_path, "vector/solar_rows.geojson", compress_type=zipfile.ZIP_DEFLATED)
+            else:
+                archive.writestr(
+                    "vector/solar_rows.geojson",
+                    json.dumps({
+                        "type": "FeatureCollection",
+                        "features": [],
+                        "row_id_note": "No Rows layer was used; standalone panels use row_id 0000.",
+                    }, indent=2),
+                    compress_type=zipfile.ZIP_DEFLATED,
+                )
             archive.write(anomalies_path, "vector/anomalies.geojson", compress_type=zipfile.ZIP_DEFLATED)
             archive.writestr(
                 f"anomaly_overlays/{FINALIZED_IMAGES_FILENAME}",

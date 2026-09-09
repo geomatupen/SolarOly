@@ -948,7 +948,10 @@ def associate_anomalies(
             row_id = str(best_panel[1].get("row_id") or "")
             if panel_id:
                 panel_anomaly_ids.setdefault(panel_id, []).append(anomaly_id)
-            if row_id:
+            # Row 0000 is the reserved marker for an identified panel that is
+            # not associated with a real row polygon. Keep it on the anomaly,
+            # but do not report it as a physical row or try to update a row.
+            if row_id and row_id != "0000":
                 row_anomaly_ids.setdefault(row_id, []).append(anomaly_id)
                 if panel_id and panel_id not in row_panel_ids.setdefault(row_id, []):
                     row_panel_ids[row_id].append(panel_id)

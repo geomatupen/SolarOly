@@ -97,6 +97,8 @@ def _map_reading_order(
     inner_row_geometries: list[Any],
 ) -> list[list[int]]:
     """Order arrays like text: horizontal bands top-to-bottom, then left-to-right."""
+    if not arrays:
+        return []
     records = []
     short_dimensions = []
     for indices in arrays:
@@ -342,7 +344,8 @@ def build_panel_hierarchy(
 
 _PANEL_ID_KEYS = {
     "row_id", "inner_row", "panel_number", "panel_id", "row_panel_count",
-    "inner_row_panel_count", "source_panel_index",
+    "inner_row_panel_count", "source_panel_index", "anomaly_count",
+    "anomaly_ids", "anomaly_panel_ids",
 }
 
 
@@ -366,16 +369,19 @@ def clear_panel_ids(path: Path) -> None:
 
 def assign_panel_ids(
     panels_path: Path,
-    rows_path: Path,
+    rows_path: Path | None = None,
     *,
     max_orientation_difference_deg: float = 15.0,
     max_lateral_distance_factor: float = 1.5,
     max_along_gap_factor: float = 1.5,
     callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
-    """Assign IDs to panels and edited rows without changing row geometry."""
+    """Assign IDs to every valid panel, optionally using edited row geometry."""
     panel_payload, panel_records, invalid_panels = load_polygon_features(panels_path)
-    row_payload, row_records, invalid_rows = load_polygon_features(rows_path)
+    if rows_path is not None:
+        row_payload, row_records, invalid_rows = load_polygon_features(rows_path)
+    else:
+        row_payload, row_records, invalid_rows = None, [], 0
     metric_crs = infer_metric_crs(record[1] for record in panel_records)
     panels: list[Panel] = []
     for source_index, geometry, properties in panel_records:
@@ -412,8 +418,8 @@ def assign_panel_ids(
     panel_updates: dict[int, dict[str, Any]] = {}
     row_updates: dict[int, dict[str, Any]] = {}
     inner_row_total = 0
-    assigned_panel_count = 0
-    _notify(callback, 58, "Assigning row and panel identifiers…")
+    row_assigned_panel_count = 0
+    _notify(callback, 58, "Assigning panel identifiers…")
     for row_number, row_index in enumerate(ordered_indices, start=1000):
         source_index, row_geometry, row_properties = projected_rows[row_index]
         row_id = str(row_number)
@@ -447,7 +453,7 @@ def assign_panel_ids(
         updated_row["properties"] = updated_row_properties
         row_updates[source_index] = updated_row
         inner_row_total += len(inner_rows)
-        assigned_panel_count += len(row_panels)
+        row_assigned_panel_count += len(row_panels)
         for inner_row_index, component in enumerate(inner_rows):
             inner_row_label = _letter_label(inner_row_index)
             component_bounds = unary_union([panel.geometry for panel in component]).bounds
@@ -475,6 +481,36 @@ def assign_panel_ids(
                 updated_panel["properties"] = properties
                 panel_updates[panel.source_index] = updated_panel
 
+    panels_without_row = [panel for panel in panels if panel.source_index not in panel_updates]
+    if panels_without_row:
+        ordered_without_row = [
+            indices[0]
+            for indices in _map_reading_order(
+                [[index] for index in range(len(panels_without_row))],
+                [panel.geometry for panel in panels_without_row],
+            )
+        ]
+        no_row_count = len(ordered_without_row)
+        for panel_number, panel_index in enumerate(ordered_without_row, start=1):
+            panel = panels_without_row[panel_index]
+            properties = {
+                key: value for key, value in panel.properties.items()
+                if key not in _PANEL_ID_KEYS
+            }
+            properties.update({
+                "postprocess_stage": "identified_panels",
+                "row_id": "0000",
+                "inner_row": None,
+                "panel_number": panel_number,
+                "panel_id": f"0000-P{panel_number:06d}",
+                "row_panel_count": no_row_count,
+                "inner_row_panel_count": None,
+                "source_panel_index": panel.source_index,
+            })
+            updated_panel = dict(panel_payload["features"][panel.source_index])
+            updated_panel["properties"] = properties
+            panel_updates[panel.source_index] = updated_panel
+
     def updated_features(payload: dict[str, Any], updates: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
         result = []
         for index, original in enumerate(payload["features"]):
@@ -490,14 +526,17 @@ def assign_panel_ids(
         return result
 
     panel_metadata = {key: value for key, value in panel_payload.items() if key not in {"type", "features"}}
-    row_metadata = {key: value for key, value in row_payload.items() if key not in {"type", "features"}}
     write_feature_collection(panels_path, updated_features(panel_payload, panel_updates), **panel_metadata)
-    write_feature_collection(rows_path, updated_features(row_payload, row_updates), **row_metadata)
-    _notify(callback, 100, "Row and panel IDs are ready.")
+    if rows_path is not None and row_payload is not None:
+        row_metadata = {key: value for key, value in row_payload.items() if key not in {"type", "features"}}
+        write_feature_collection(rows_path, updated_features(row_payload, row_updates), **row_metadata)
+    _notify(callback, 100, "Panel IDs are ready.")
     return {
         "panel_count": len(panels),
-        "assigned_panel_count": assigned_panel_count,
-        "unassigned_panel_count": len(panels) - assigned_panel_count,
+        "assigned_panel_count": len(panel_updates),
+        "row_assigned_panel_count": row_assigned_panel_count,
+        "no_row_panel_count": len(panels_without_row),
+        "unassigned_panel_count": len(panels) - len(panel_updates),
         "invalid_panel_count": invalid_panels,
         "row_count": len(projected_rows),
         "invalid_row_count": invalid_rows,

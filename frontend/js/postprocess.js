@@ -310,7 +310,16 @@
           ["Minimum row overlap to absorb", `${detailValue(hierarchy.min_row_overlap_percent)}%`],
           ["Panels used to build rows", detailValue(status.hierarchy_stats.panel_count)],
           ["Panels assigned IDs", detailValue(status.assignment_stats?.assigned_panel_count)],
-          ["Panels outside edited rows", detailValue(status.assignment_stats?.unassigned_panel_count)],
+          ["Panels assigned to rows", detailValue(status.assignment_stats?.row_assigned_panel_count)],
+          ["Panels with row ID 0000", detailValue(status.assignment_stats?.no_row_panel_count)],
+          ["ID ordering", "Map reading order: top-to-bottom, then left-to-right"],
+        ]);
+      } else if (status.assignment_stats) {
+        appendGenerationSection(container, "ID assignment", [
+          ["Mode", "No Rows — reserved row ID 0000"],
+          ["Panels assigned IDs", detailValue(status.assignment_stats.assigned_panel_count)],
+          ["Panels with row ID 0000", detailValue(status.assignment_stats.no_row_panel_count)],
+          ["Invalid panels", detailValue(status.assignment_stats.invalid_panel_count)],
           ["ID ordering", "Map reading order: top-to-bottom, then left-to-right"],
         ]);
       }
@@ -332,7 +341,8 @@
         ["Inner rows", detailValue(stats.inner_row_count)],
         ["Singleton rows", detailValue(stats.singleton_rows)],
         ["Panels assigned IDs", detailValue(status.assignment_stats?.assigned_panel_count)],
-        ["Panels outside edited rows", detailValue(status.assignment_stats?.unassigned_panel_count)],
+        ["Panels assigned to rows", detailValue(status.assignment_stats?.row_assigned_panel_count)],
+        ["Panels with row ID 0000", detailValue(status.assignment_stats?.no_row_panel_count)],
       ]);
     }
   }
@@ -500,8 +510,13 @@
     if (!canShow) return;
     const steps = [byId("ppCombineStep"), byId("ppRegularizeStep"), byId("ppHierarchyStep"), byId("ppAssignIdsStep")];
     steps.forEach(step => { step.hidden = false; });
-    const available = [state.scanComplete || hasCombined, hasCombined, hasRegularized, hasRows];
-    const completed = [hasCombined, hasRegularized, hasRows, hasAssignments];
+    const available = [state.scanComplete || hasCombined, hasCombined, hasRegularized, hasRegularized];
+    const completed = [
+      hasCombined,
+      hasRegularized,
+      hasRows || status?.assignment_mode === "no_rows",
+      hasAssignments,
+    ];
     steps.forEach((step, index) => {
       step.classList.toggle("locked", !available[index]);
       step.setAttribute("aria-disabled", String(!available[index]));

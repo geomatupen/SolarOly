@@ -417,6 +417,57 @@ class PostprocessWorkflowTests(unittest.TestCase):
                 {"1000-A1", "1000-A2", "1000-A3"},
             )
 
+    def test_assigns_reserved_ids_to_panels_outside_edited_rows(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            panels_path = root / "regularized.geojson"
+            rows_path = root / "solar_rows.geojson"
+            _write(panels_path, [
+                _feature(box(500000, 5500000, 500001, 5500001.8), marker="inside"),
+                _feature(box(500010, 5500000, 500011, 5500001.8), marker="outside"),
+            ])
+            _write(rows_path, [
+                _feature(box(499999, 5499999, 500002, 5500003)),
+            ])
+
+            stats = assign_panel_ids(panels_path, rows_path)
+
+            properties = {
+                feature["properties"]["marker"]: feature["properties"]
+                for feature in json.loads(panels_path.read_text(encoding="utf-8"))["features"]
+            }
+            self.assertEqual(properties["inside"]["row_id"], "1000")
+            self.assertEqual(properties["inside"]["panel_id"], "1000-A1")
+            self.assertEqual(properties["outside"]["row_id"], "0000")
+            self.assertEqual(properties["outside"]["panel_id"], "0000-P000001")
+            self.assertEqual(stats["assigned_panel_count"], 2)
+            self.assertEqual(stats["row_assigned_panel_count"], 1)
+            self.assertEqual(stats["no_row_panel_count"], 1)
+            self.assertEqual(stats["unassigned_panel_count"], 0)
+
+    def test_assigns_all_panels_without_building_rows(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            panels_path = root / "regularized.geojson"
+            _write(panels_path, [
+                _feature(box(500010, 5500000, 500011, 5500001.8), marker="right"),
+                _feature(box(500000, 5500000, 500001, 5500001.8), marker="left"),
+            ])
+
+            stats = assign_panel_ids(panels_path)
+
+            properties = {
+                feature["properties"]["marker"]: feature["properties"]
+                for feature in json.loads(panels_path.read_text(encoding="utf-8"))["features"]
+            }
+            self.assertEqual(properties["left"]["panel_id"], "0000-P000001")
+            self.assertEqual(properties["right"]["panel_id"], "0000-P000002")
+            self.assertEqual({item["row_id"] for item in properties.values()}, {"0000"})
+            self.assertEqual(stats["assigned_panel_count"], 2)
+            self.assertEqual(stats["row_assigned_panel_count"], 0)
+            self.assertEqual(stats["no_row_panel_count"], 2)
+            self.assertEqual(stats["row_count"], 0)
+
     def test_merges_candidate_row_contained_inside_outer_row(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -512,6 +563,36 @@ class PostprocessWorkflowTests(unittest.TestCase):
             self.assertEqual(updated_row["properties"]["anomaly_count"], 1)
             self.assertEqual(updated_row["properties"]["anomaly_ids"], [assigned["properties"]["anomaly_id"]])
             self.assertEqual(updated_row["properties"]["anomaly_panel_ids"], ["ROW-0001-PANEL-0001"])
+
+    def test_associates_anomaly_to_panel_without_counting_reserved_row(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            anomalies = root / "anomalies.geojson"
+            panels = root / "panels.geojson"
+            associated = root / "associated.geojson"
+            _write(anomalies, [
+                _feature(box(500000.2, 5500000.2, 500000.6, 5500000.6), anomaly_id="A-1"),
+            ])
+            _write(panels, [
+                _feature(
+                    box(500000, 5500000, 500001, 5500001),
+                    panel_id="0000-P000001",
+                    row_id="0000",
+                ),
+            ])
+
+            stats = associate_anomalies(
+                anomalies,
+                panels,
+                associated,
+                panel_output_path=panels,
+            )
+
+            assigned = json.loads(associated.read_text(encoding="utf-8"))["features"][0]["properties"]
+            self.assertEqual(assigned["panel_id"], "0000-P000001")
+            self.assertEqual(assigned["row_id"], "0000")
+            self.assertEqual(stats["assigned"], 1)
+            self.assertEqual(stats["rows_with_anomalies"], 0)
 
 
 if __name__ == "__main__":

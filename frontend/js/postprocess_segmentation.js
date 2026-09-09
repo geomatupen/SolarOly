@@ -10,6 +10,7 @@
     option.textContent = label;
     if (workflowId) option.dataset.workflowId = workflowId;
     select.appendChild(option);
+    return option;
   }
 
   function hierarchySource(workflow, geojsonFiles = []) {
@@ -50,31 +51,48 @@
       || ["queued", "running"].includes(selectedWorkflow?.status);
     const assignmentSelect = byId("ppAssignmentSource");
     const previousAssignment = assignmentSelect.value;
-    const rowWorkflows = context.workflows.filter(workflow =>
-      workflow.workflow_kind !== "anomaly" && workflow.outputs?.solar_rows?.path
+    const assignmentWorkflows = context.workflows.filter(workflow =>
+      workflow.workflow_kind !== "anomaly" && hierarchySource(workflow, context.geojsonFiles)
     );
     assignmentSelect.replaceChildren();
-    addOption(assignmentSelect, "", "Select an edited Rows output…");
-    rowWorkflows.forEach((workflow, index) => {
+    addOption(assignmentSelect, "", "Select how to assign IDs…");
+    assignmentWorkflows.forEach((workflow, index) => {
       const created = workflow.created_at
         ? new Date(workflow.created_at).toLocaleString()
         : workflow.id;
       const latest = index === 0 ? " · Latest" : "";
-      addOption(
+      if (workflow.outputs?.solar_rows?.path) {
+        const rowsOption = addOption(
+          assignmentSelect,
+          `${workflow.id}:rows`,
+          `Use edited Rows · ${created}${latest}`,
+          workflow.id,
+        );
+        rowsOption.dataset.useRows = "true";
+      }
+      const noRowsOption = addOption(
         assignmentSelect,
-        workflow.outputs.solar_rows.path,
-        `Rows · ${created}${latest}`,
+        `${workflow.id}:no-rows`,
+        `Skip Rows — use row ID 0000 · ${created}${latest}`,
         workflow.id,
       );
+      noRowsOption.dataset.useRows = "false";
     });
     if (previousAssignment && [...assignmentSelect.options].some(option => option.value === previousAssignment)) {
       assignmentSelect.value = previousAssignment;
     } else if (assignmentSelect.options.length > 1) {
-      assignmentSelect.selectedIndex = 1;
+      const latestWorkflow = assignmentWorkflows[0];
+      const preferredUseRows = latestWorkflow?.assignment_mode !== "no_rows"
+        && Boolean(latestWorkflow?.outputs?.solar_rows?.path);
+      const preferred = [...assignmentSelect.options].find(option =>
+        option.dataset.workflowId === latestWorkflow?.id
+        && option.dataset.useRows === String(preferredUseRows)
+      );
+      assignmentSelect.value = preferred?.value || assignmentSelect.options[1].value;
     }
-    assignmentSelect.disabled = rowWorkflows.length === 0;
+    assignmentSelect.disabled = assignmentWorkflows.length === 0;
     const assignmentWorkflowId = assignmentSelect.selectedOptions[0]?.dataset.workflowId;
-    const assignmentWorkflow = rowWorkflows.find(workflow => workflow.id === assignmentWorkflowId);
+    const assignmentWorkflow = assignmentWorkflows.find(workflow => workflow.id === assignmentWorkflowId);
     byId("ppAssignIds").disabled = !assignmentSelect.value
       || ["queued", "running"].includes(assignmentWorkflow?.status);
   }
@@ -136,14 +154,26 @@
     const workspace = api();
     const context = workspace.getContext();
     const select = byId("ppAssignmentSource");
-    const workflowId = select.selectedOptions[0]?.dataset.workflowId;
+    const selectedOption = select.selectedOptions[0];
+    const workflowId = selectedOption?.dataset.workflowId;
+    const useRows = selectedOption?.dataset.useRows === "true";
     if (!context.resultId || !workflowId || !select.value) return;
+    const workflow = context.workflows.find(item => item.id === workflowId);
+    if (workflow?.assignment_stats) {
+      const confirmed = await workspace.confirmReplacement(
+        "Replace panel IDs?",
+        "Existing row and panel IDs will be replaced. If anomalies were already assigned to these panels, that final anomaly output will be removed and must be assigned again.",
+      );
+      if (!confirmed) return;
+    }
     byId("ppAssignIds").disabled = true;
-    workspace.setMessage("Assigning IDs from the edited Rows layer…");
+    workspace.setMessage(useRows
+      ? "Assigning IDs from the edited Rows layer…"
+      : "Assigning panel IDs with row ID 0000…");
     try {
       workspace.selectWorkflow(workflowId);
       const payload = await workspace.requestJson(
-        `/api/results/${encodeURIComponent(context.resultId)}/postprocess/${encodeURIComponent(workflowId)}/assign-ids`,
+        `/api/results/${encodeURIComponent(context.resultId)}/postprocess/${encodeURIComponent(workflowId)}/assign-ids?use_rows=${useRows}`,
         { method: "POST" },
       );
       await workspace.runWorkflow(payload);

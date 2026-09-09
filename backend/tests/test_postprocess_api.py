@@ -652,6 +652,60 @@ class PostprocessApiTests(unittest.TestCase):
             self.assertNotIn("panel_id", saved_panel["properties"])
             self.assertIsNone(payload["assignment_stats"])
 
+    def test_assign_ids_can_skip_row_generation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sessions = root / "sessions"
+            overlays = root / "overlays"
+            result_dir = sessions / "test-result"
+            workflow_dir = result_dir / "postprocess" / "solar-panels"
+            workflow_dir.mkdir(parents=True)
+            overlays.mkdir()
+            regularized_path = workflow_dir / "regularized.geojson"
+            regularized_path.write_text(json.dumps({
+                "type": "FeatureCollection",
+                "features": [{
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [[[8.0, 49.0], [8.00001, 49.0], [8.00001, 49.00001], [8.0, 49.00001], [8.0, 49.0]]],
+                    },
+                    "properties": {},
+                }],
+            }), encoding="utf-8")
+            (workflow_dir / "status.json").write_text(json.dumps({
+                "id": "solar-panels",
+                "status": "complete",
+                "outputs": {
+                    "regularized": {"path": "postprocess/solar-panels/regularized.geojson"},
+                },
+            }), encoding="utf-8")
+            router = create_postprocess_router(
+                lambda: sessions,
+                lambda: overlays,
+                lambda path: f"/media/{path.name}",
+            )
+            route = next(
+                item for item in router.routes
+                if item.path == "/api/results/{result_id}/postprocess/{workflow_id}/assign-ids"
+                and "POST" in item.methods
+            )
+
+            queued = asyncio.run(route.endpoint("test-result", "solar-panels", False))
+            self.assertEqual(queued["status"], "queued")
+            for _ in range(100):
+                status = json.loads((workflow_dir / "status.json").read_text(encoding="utf-8"))
+                if status.get("status") != "running" and status.get("status") != "queued":
+                    break
+                time.sleep(0.02)
+
+            self.assertEqual(status["status"], "complete")
+            self.assertEqual(status["assignment_mode"], "no_rows")
+            self.assertEqual(status["assignment_stats"]["no_row_panel_count"], 1)
+            panel = json.loads(regularized_path.read_text(encoding="utf-8"))["features"][0]
+            self.assertEqual(panel["properties"]["row_id"], "0000")
+            self.assertEqual(panel["properties"]["panel_id"], "0000-P000001")
+
 
 if __name__ == "__main__":
     unittest.main()

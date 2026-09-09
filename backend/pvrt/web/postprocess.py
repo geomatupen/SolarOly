@@ -506,6 +506,49 @@ def create_postprocess_router(
         except (HTTPException, OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
             append_log(anomaly_workflow_dir, f"WARNING: Could not clear stale panel anomaly attributes: {exc}")
 
+    def invalidate_linked_anomaly_output(
+        panel_result_id: str,
+        panel_workflow_dir: Path,
+        panel_status: dict[str, Any],
+    ) -> None:
+        """Remove a finalized anomaly layer whose panel IDs are about to change."""
+        association = panel_status.get("anomaly_association") or {}
+        anomaly_workflow_id = str(association.get("anomaly_workflow_id") or "")
+        if not anomaly_workflow_id:
+            return
+        anomaly_result_id = str(association.get("anomaly_result_id") or "")
+        workspace_match = re.fullmatch(r"ppjob__(.+)__segmentation", panel_result_id)
+        if workspace_match:
+            anomaly_result_id = f"ppjob__{workspace_match.group(1)}__anomaly"
+        try:
+            anomaly_result_dir = resolve_result(anomaly_result_id)
+            anomaly_workflow_dir = resolve_workflow(anomaly_result_dir, anomaly_workflow_id)
+            anomaly_status = read_status(anomaly_workflow_dir)
+            clear_panel_anomaly_assignments(anomaly_workflow_dir, anomaly_status)
+            anomaly_outputs = remove_stage_outputs(
+                anomaly_result_dir,
+                anomaly_workflow_dir,
+                anomaly_status,
+                {"associated"},
+            )
+            update_status(
+                anomaly_workflow_dir,
+                status="complete",
+                stage="placement_review",
+                progress=100,
+                message="Panel IDs changed. Assign anomalies to panels again.",
+                association_stats=None,
+                outputs=anomaly_outputs,
+            )
+            latest_panel_status = read_status(panel_workflow_dir)
+            update_status(
+                panel_workflow_dir,
+                anomaly_association=None,
+                outputs=latest_panel_status.get("outputs") or {},
+            )
+        except (HTTPException, OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            append_log(panel_workflow_dir, f"WARNING: Could not invalidate stale anomaly assignments: {exc}")
+
     @router.get("/{result_id}/postprocess/geojsons")
     async def list_geojsons(result_id: str) -> dict[str, Any]:
         result_dir = resolve_result(result_id)
@@ -716,6 +759,7 @@ def create_postprocess_router(
         combined_path = workflow_dir / "combined.geojson"
         if not combined_path.is_file():
             raise HTTPException(status_code=409, detail="Combine fragments before regularizing.")
+        invalidate_linked_anomaly_output(result_id, workflow_dir, status)
         outputs = remove_stage_outputs(
             result_dir,
             workflow_dir,
@@ -736,6 +780,9 @@ def create_postprocess_router(
             regularize_parameters=(
                 request.model_dump() if hasattr(request, "model_dump") else request.dict()
             ),
+            hierarchy_stats=None,
+            assignment_stats=None,
+            assignment_mode=None,
             outputs=outputs,
             manual_edits=manual_edits,
         )
@@ -791,6 +838,7 @@ def create_postprocess_router(
             input_path.relative_to(workflow_dir)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="Select an output from this segmentation workflow.") from exc
+        invalidate_linked_anomaly_output(result_id, workflow_dir, status)
         outputs = remove_stage_outputs(
             result_dir,
             workflow_dir,
@@ -810,6 +858,7 @@ def create_postprocess_router(
             message="Queued row generation.",
             hierarchy_parameters=request.model_dump() if hasattr(request, "model_dump") else request.dict(),
             assignment_stats=None,
+            assignment_mode=None,
             outputs=outputs,
             manual_edits=manual_edits,
         )
@@ -829,6 +878,7 @@ def create_postprocess_router(
                     assign_ids=False,
                     callback=progress_callback(workflow_dir, "hierarchy"),
                 )
+                clear_panel_ids(input_path)
                 latest = read_status(workflow_dir)
                 current_outputs = dict(latest.get("outputs") or {})
                 current_outputs["regularized"] = {
@@ -856,7 +906,11 @@ def create_postprocess_router(
         return {"ok": True, "id": workflow_id, "status": "queued", "stage": "hierarchy"}
 
     @router.post("/{result_id}/postprocess/{workflow_id}/assign-ids")
-    async def assign_ids(result_id: str, workflow_id: str) -> dict[str, Any]:
+    async def assign_ids(
+        result_id: str,
+        workflow_id: str,
+        use_rows: bool = True,
+    ) -> dict[str, Any]:
         result_dir = resolve_result(result_id)
         workflow_dir = resolve_workflow(result_dir, workflow_id)
         status = read_status(workflow_dir)
@@ -865,22 +919,28 @@ def create_postprocess_router(
         outputs = status.get("outputs") or {}
         panel_value = str((outputs.get("regularized") or {}).get("path") or "")
         row_value = str((outputs.get("solar_rows") or {}).get("path") or "")
-        if not panel_value or not row_value:
-            raise HTTPException(status_code=409, detail="Build and edit Rows before assigning IDs.")
+        if not panel_value:
+            raise HTTPException(status_code=409, detail="Regularize panels before assigning IDs.")
+        if use_rows and not row_value:
+            raise HTTPException(status_code=409, detail="Build Rows or choose panel-only ID assignment.")
         panels_path = resolve_input(result_dir, panel_value)
-        rows_path = resolve_input(result_dir, row_value)
+        available_rows_path = resolve_input(result_dir, row_value) if row_value else None
+        rows_path = available_rows_path if use_rows else None
         try:
             panels_path.relative_to(workflow_dir)
-            rows_path.relative_to(workflow_dir)
+            if available_rows_path is not None:
+                available_rows_path.relative_to(workflow_dir)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="Select outputs from this segmentation workflow.") from exc
         parameters = status.get("hierarchy_parameters") or {}
+        invalidate_linked_anomaly_output(result_id, workflow_dir, status)
         update_status(
             workflow_dir,
             status="queued",
             stage="assign_ids",
             progress=0,
-            message="Queued row and panel ID assignment.",
+            message="Queued row-aware panel ID assignment." if use_rows else "Queued panel-only ID assignment.",
+            assignment_mode="rows" if use_rows else "no_rows",
             outputs=outputs,
         )
 
@@ -894,16 +954,22 @@ def create_postprocess_router(
                     max_along_gap_factor=float(parameters.get("max_along_gap_factor", 1.5)),
                     callback=progress_callback(workflow_dir, "assign_ids"),
                 )
+                if not use_rows and available_rows_path is not None:
+                    clear_panel_ids(available_rows_path)
                 update_status(
                     workflow_dir,
                     status="complete",
                     stage="assign_ids",
                     progress=100,
-                    message="Row and panel IDs are ready.",
+                    message=(
+                        "Row and panel IDs are ready."
+                        if use_rows
+                        else "Panel IDs are ready with row ID 0000."
+                    ),
                     assignment_stats=stats,
                     outputs=outputs,
                 )
-                log.info("UI:OK:postprocess: Row and panel IDs ready for %s", result_dir.name)
+                log.info("UI:OK:postprocess: Panel IDs ready for %s", result_dir.name)
             except Exception as exc:
                 append_log(workflow_dir, f"ERROR: {exc}")
                 update_status(workflow_dir, status="failed", stage="assign_ids", message=str(exc), error=str(exc))
@@ -1519,7 +1585,7 @@ def create_postprocess_router(
                     update_status(
                         panel_workflow_dir,
                         anomaly_association={
-                            "anomaly_result_id": result_dir.name,
+                            "anomaly_result_id": result_id,
                             "anomaly_workflow_id": workflow_id,
                             "associated_anomalies": stats["assigned"],
                             "panels_with_anomalies": stats["panels_with_anomalies"],
@@ -1823,6 +1889,7 @@ def create_postprocess_router(
             "updated_at": datetime.now().isoformat(),
         }
         if stage == "solar_rows":
+            invalidate_linked_anomaly_output(result_id, workflow_dir, current)
             regularized = (current.get("outputs") or {}).get("regularized") or {}
             regularized_path = str(regularized.get("path") or "")
             if regularized_path:
@@ -1835,6 +1902,7 @@ def create_postprocess_router(
             message=f"{stage.replace('_', ' ').title()} GeoJSON updated.",
             manual_edits=manual_edits,
             assignment_stats=None if stage == "solar_rows" else current.get("assignment_stats"),
+            assignment_mode=None if stage == "solar_rows" else current.get("assignment_mode"),
         )
         return read_status(workflow_dir)
 

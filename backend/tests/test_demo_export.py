@@ -157,6 +157,19 @@ class DemoExportTests(unittest.TestCase):
                 create_solar_demo_export(job_dir, sessions)
             replaced = create_solar_demo_export(job_dir, sessions, replace=True)
             self.assertEqual(replaced["path"], str(archive_path))
+
+            segmentation_status_path = segmentation_workflow / "status.json"
+            segmentation_status = json.loads(segmentation_status_path.read_text(encoding="utf-8"))
+            segmentation_status["outputs"].pop("solar_rows")
+            segmentation_status["assignment_mode"] = "no_rows"
+            segmentation_status_path.write_text(json.dumps(segmentation_status), encoding="utf-8")
+            rows.unlink()
+            no_rows_export = create_solar_demo_export(job_dir, sessions, replace=True)
+            with zipfile.ZipFile(no_rows_export["path"]) as archive:
+                exported_rows = json.loads(archive.read("vector/solar_rows.geojson"))
+                self.assertEqual(exported_rows["type"], "FeatureCollection")
+                self.assertEqual(exported_rows["features"], [])
+
             deleted = delete_solar_demo_export(job_dir)
             self.assertEqual(deleted["path"], str(archive_path))
             self.assertGreater(deleted["deleted_size"], 0)

@@ -514,7 +514,7 @@
             <div class="postprocessStepNumber">3</div>
             <div class="postprocessStepBody">
               <h3>Build rows</h3>
-              <p class="muted tiny">Group neighbouring regularized panels into an editable Rows layer. Review and edit the row polygons before assigning IDs.</p>
+              <p class="muted tiny">Optional: group neighbouring regularized panels into an editable Rows layer. Review and edit the row polygons before assigning row-aware IDs, or skip this step and assign standalone panel IDs.</p>
               <div class="postprocessFields">
                 <div>
                   <label for="ppHierarchySource">Regularized output</label>
@@ -549,14 +549,14 @@
             <div class="postprocessStepNumber">4</div>
             <div class="postprocessStepBody">
               <h3>Assign IDs</h3>
-              <p class="muted tiny">Use the edited Rows layer to assign row IDs to Rows and panel IDs such as 1000-A1 to Regularized panels.</p>
+              <p class="muted tiny">Assign a unique ID to every valid Regularized panel. Use edited Rows for IDs such as 1000-A1; panels outside those rows receive row ID 0000. You can also skip Rows and assign all panels to 0000.</p>
               <div class="postprocessFields">
                 <div>
-                  <label for="ppAssignmentSource">Edited Rows output</label>
-                  <select id="ppAssignmentSource" disabled><option value="">Build rows first…</option></select>
+                  <label for="ppAssignmentSource">ID assignment mode</label>
+                  <select id="ppAssignmentSource" disabled><option value="">Regularize panels first…</option></select>
                 </div>
               </div>
-              <button id="ppAssignIds" type="button" disabled>Assign row and panel IDs</button>
+              <button id="ppAssignIds" type="button" disabled>Assign panel IDs</button>
             </div>
           </article>
         </div>
@@ -1636,9 +1636,9 @@
   <script src="js/project-tab-router.js?v=20260902a"></script>
   <script src="js/main.js?v=20260908c"></script>
   <script src="js/postprocess-layer-move.js?v=20260902e"></script>
-  <script src="js/postprocess.js?v=20260906d"></script>
-  <script src="js/postprocess_segmentation.js?v=20260903d"></script>
-  <script src="js/postprocess_anomaly.js?v=20260903n"></script>
+  <script src="js/postprocess.js?v=20260909a"></script>
+  <script src="js/postprocess_segmentation.js?v=20260909a"></script>
+  <script src="js/postprocess_anomaly.js?v=20260909a"></script>
   <script>
     // Display active project name in header
     async function initProjectHeader() {
