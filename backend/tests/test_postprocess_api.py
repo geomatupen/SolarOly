@@ -23,6 +23,43 @@ class PostprocessApiTests(unittest.TestCase):
         request = OverlapDeduplicateAnomaliesRequest(input_path="anomalies.geojson")
         self.assertEqual(request.minimum_overlap_percent, 20.0)
 
+    def test_visual_deduplication_skip_is_persisted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sessions = root / "sessions"
+            overlays = root / "overlays"
+            workflow_dir = sessions / "test-result" / "postprocess" / "anomalies"
+            workflow_dir.mkdir(parents=True)
+            overlays.mkdir()
+            overlap_path = workflow_dir / "overlap_deduplicated.geojson"
+            overlap_path.write_text('{"type":"FeatureCollection","features":[]}', encoding="utf-8")
+            (workflow_dir / "status.json").write_text(json.dumps({
+                "id": "anomalies",
+                "status": "complete",
+                "workflow_kind": "anomaly",
+                "outputs": {
+                    "overlap_deduplicated": {
+                        "path": "postprocess/anomalies/overlap_deduplicated.geojson",
+                    },
+                },
+            }), encoding="utf-8")
+            router = create_postprocess_router(
+                lambda: sessions,
+                lambda: overlays,
+                lambda path: f"/media/{path.name}",
+            )
+            route = next(
+                item for item in router.routes
+                if item.path == "/api/results/{result_id}/postprocess/{workflow_id}/deduplicate/skip"
+                and "POST" in item.methods
+            )
+
+            status = asyncio.run(route.endpoint("test-result", "anomalies"))
+
+            self.assertTrue(status["visual_deduplication_skipped"])
+            self.assertEqual(status["stage"], "deduplicate_skip")
+            self.assertIn("overlap_deduplicated", status["outputs"])
+
     def test_dissolve_unions_selected_polygons(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

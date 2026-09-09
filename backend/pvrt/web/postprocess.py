@@ -1033,6 +1033,7 @@ def create_postprocess_router(
             "association_stats": None,
             "association_parameters": None,
             "placement_review_complete": False,
+            "visual_deduplication_skipped": False,
             "visual_review_available": False,
             "visual_review_total_pairs": 0,
             "visual_review_path": "",
@@ -1100,6 +1101,7 @@ def create_postprocess_router(
             "source_fingerprint": source_fingerprint(input_path),
             "parameters": request.model_dump() if hasattr(request, "model_dump") else request.dict(),
             "outputs": dict(existing.get("outputs") or {}),
+            "visual_deduplication_skipped": False,
         }
         previous_review_available = bool(
             existing.get("visual_review_available")
@@ -1172,6 +1174,30 @@ def create_postprocess_router(
 
         _EXECUTOR.submit(run)
         return initial
+
+    @router.post("/{result_id}/postprocess/{workflow_id}/deduplicate/skip")
+    async def skip_visual_deduplication(result_id: str, workflow_id: str) -> dict[str, Any]:
+        result_dir = resolve_result(result_id)
+        workflow_dir = resolve_workflow(result_dir, workflow_id)
+        status = read_status(workflow_dir)
+        if status.get("status") in {"queued", "running"}:
+            raise HTTPException(status_code=409, detail="This workflow is already running.")
+        outputs = status.get("outputs") or {}
+        if not outputs.get("overlap_deduplicated"):
+            raise HTTPException(status_code=409, detail="Remove overlapping predictions before skipping visual analysis.")
+        if outputs.get("deduplicated") or outputs.get("associated"):
+            raise HTTPException(
+                status_code=409,
+                detail="Visual deduplication has already produced downstream outputs and cannot be skipped.",
+            )
+        return update_status(
+            workflow_dir,
+            status="complete",
+            stage="deduplicate_skip",
+            progress=100,
+            message="Visual duplicate analysis skipped. Continue with placement review.",
+            visual_deduplication_skipped=True,
+        )
 
     @router.post("/{result_id}/postprocess/anomalies/neighbor-stats")
     async def anomaly_neighbor_stats(

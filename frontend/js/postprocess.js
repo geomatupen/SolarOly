@@ -719,6 +719,7 @@
     state.pollToken += 1;
     byId("ppCombine").disabled = true;
     byId("ppRegularize").disabled = true;
+    byId("ppSkipHierarchy").disabled = true;
     byId("ppCombineStep").hidden = true;
     byId("ppRegularizeStep").hidden = true;
     byId("ppHierarchyStep").hidden = true;

@@ -1395,6 +1395,7 @@ body.postprocessFullscreenOpen { overflow: hidden; }
   min-height: 40px;
   white-space: nowrap;
 }
+.postprocessStepActions .postprocessSkipButton { margin-left: auto; }
 .postprocessWeightsModalContent {
   display: flex;
   width: min(760px, calc(100vw - 32px));

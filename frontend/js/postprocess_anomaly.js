@@ -1373,6 +1373,7 @@
     const hasDeduplicated = Boolean(
       workflow?.outputs?.deduplicated || workflow?.outputs?.overlap_deduplicated
     );
+    const visualDeduplicationSkipped = Boolean(workflow?.visual_deduplication_skipped);
     renderVisualReview(workflow);
     const anomalySelect = byId("ppAnomalyGeojson");
     const previousAnomaly = anomalySelect.value;
@@ -1423,7 +1424,9 @@
     byId("ppDeduplicate").textContent = workflowRunning && workflow?.stage === "deduplicate"
       ? "Analyzing visual duplicates…"
       : "Analyze visual duplicates";
-    byId("ppSkipVisualDeduplication").disabled = !hasOverlapDeduplicated || workflowRunning;
+    byId("ppSkipVisualDeduplication").disabled = !hasOverlapDeduplicated
+      || workflowRunning
+      || Boolean(workflow?.outputs?.deduplicated || workflow?.outputs?.associated);
 
     const panelSourceSelect = byId("ppAssociationPanelSource");
     const previousPanelSource = panelSourceSelect.value;
@@ -1477,14 +1480,14 @@
     const hasAssociated = Boolean(workflow?.outputs?.associated);
     [
       [byId("ppOverlapDeduplicateStep"), Boolean(workflow?.outputs?.overlap_deduplicated)],
-      [byId("ppDeduplicateStep"), Boolean(workflow?.outputs?.deduplicated) || hasAssociated],
+      [byId("ppDeduplicateStep"), visualDeduplicationSkipped || Boolean(workflow?.outputs?.deduplicated) || hasAssociated],
       [byId("ppAdjustAnomaliesStep"), placementComplete],
       [byId("ppAssociateStep"), hasAssociated],
     ].forEach(([step, completed]) => setAnomalyStepCompleted(step, completed));
     const phase = workflow?.outputs?.associated
       ? 0
       : placementComplete ? 4
-        : workflow?.deduplicate_stats ? 3
+        : visualDeduplicationSkipped || workflow?.deduplicate_stats ? 3
         : hasOverlapDeduplicated ? 2 : 1;
     if (phase !== anomalyStepPhase) {
       anomalyStepPhase = phase;
@@ -1861,10 +1864,26 @@
     });
     byId("ppApplyVisualDeduplication")?.addEventListener("click", applyVisualDeduplication);
     byId("ppRemoveOverlappingAnomalies")?.addEventListener("click", removeOverlappingAnomalies);
-    byId("ppSkipVisualDeduplication")?.addEventListener("click", () => {
-      setAnomalyStepCollapsed(byId("ppDeduplicateStep"), true);
-      setAnomalyStepCollapsed(byId("ppAdjustAnomaliesStep"), false);
-      byId("ppAdjustAnomaliesStep")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    byId("ppSkipVisualDeduplication")?.addEventListener("click", async event => {
+      const button = event.currentTarget;
+      const workspace = api();
+      const context = workspace?.getContext();
+      if (!context?.resultId || !context.workflowId) return;
+      button.disabled = true;
+      workspace.setMessage("Skipping visual duplicate analysis…");
+      try {
+        const payload = await workspace.requestJson(
+          `/api/results/${encodeURIComponent(context.resultId)}/postprocess/${encodeURIComponent(context.workflowId)}/deduplicate/skip`,
+          { method: "POST" },
+        );
+        await workspace.runWorkflow(payload);
+        setAnomalyStepCollapsed(byId("ppDeduplicateStep"), true);
+        setAnomalyStepCollapsed(byId("ppAdjustAnomaliesStep"), false);
+        byId("ppAdjustAnomaliesStep")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      } catch (error) {
+        workspace.setMessage(error.message, "err");
+        button.disabled = false;
+      }
     });
     for (const id of Object.keys(scoringDefaults)) byId(id)?.addEventListener("input", refreshScoringControls);
     byId("ppDeduplicationMode")?.addEventListener("change", () => {

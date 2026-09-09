@@ -47,8 +47,10 @@
     select.disabled = workflows.length === 0;
     const selectedWorkflowId = select.selectedOptions[0]?.dataset.workflowId;
     const selectedWorkflow = workflows.find(workflow => workflow.id === selectedWorkflowId);
-    byId("ppBuildHierarchy").disabled = !select.value
+    const hierarchyUnavailable = !select.value
       || ["queued", "running"].includes(selectedWorkflow?.status);
+    byId("ppBuildHierarchy").disabled = hierarchyUnavailable;
+    byId("ppSkipHierarchy").disabled = hierarchyUnavailable;
     const assignmentSelect = byId("ppAssignmentSource");
     const previousAssignment = assignmentSelect.value;
     const assignmentWorkflows = context.workflows.filter(workflow =>
@@ -183,8 +185,37 @@
     }
   }
 
+  function setStepExpanded(stepId, expanded) {
+    const step = byId(stepId);
+    const collapsed = step?.classList.contains("collapsed");
+    if (step && collapsed === expanded) step.querySelector(".postprocessStepCollapse")?.click();
+  }
+
+  function skipHierarchy() {
+    const workspace = api();
+    const sourceOption = byId("ppHierarchySource")?.selectedOptions[0];
+    const workflowId = sourceOption?.dataset.workflowId;
+    if (!workflowId) return;
+    const assignmentSelect = byId("ppAssignmentSource");
+    const noRowsOption = [...assignmentSelect.options].find(option =>
+      option.dataset.workflowId === workflowId && option.dataset.useRows === "false"
+    );
+    if (!noRowsOption) return;
+    assignmentSelect.value = noRowsOption.value;
+    assignmentSelect.disabled = false;
+    byId("ppAssignIds").disabled = false;
+    workspace.selectWorkflow(workflowId);
+    workspace.setMessage("Row generation skipped. Assign standalone panel IDs using row ID 0000.");
+    window.requestAnimationFrame(() => {
+      setStepExpanded("ppHierarchyStep", false);
+      setStepExpanded("ppAssignIdsStep", true);
+      byId("ppAssignIdsStep")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }
+
   function init() {
     byId("ppBuildHierarchy")?.addEventListener("click", buildHierarchy);
+    byId("ppSkipHierarchy")?.addEventListener("click", skipHierarchy);
     byId("ppAssignIds")?.addEventListener("click", assignIds);
     byId("ppHierarchySource")?.addEventListener("change", event => {
       byId("ppBuildHierarchy").disabled = !event.target.value;
