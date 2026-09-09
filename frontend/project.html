@@ -1152,12 +1152,17 @@
       </div>
       <div class="modalBody infoBody workflowInfoBody">
         <p><strong>Every valid panel receives a unique ID.</strong> Assigning IDs does not move or reshape panels or rows.</p>
+        <p><strong>Input choice:</strong> When a Rows layer exists, <em>Use Rows and Regularized panels</em> is selected by default.</p>
+        <ul>
+          <li><strong>Use Rows and Regularized panels:</strong> assign row-aware IDs using the latest edited Rows and Regularized panel layers.</li>
+          <li><strong>Skip Rows and use Regularized panels only:</strong> ignore the Rows layer and assign every valid panel to the reserved row ID <code>0000</code>.</li>
+        </ul>
+        <p><strong>ID structure:</strong></p>
         <ol>
           <li>Edited Rows are numbered in map reading order, starting at <code>1000</code>.</li>
           <li>Inner panel rows use letters <code>A</code>, <code>B</code>, <code>C</code>, and so on. Panels are numbered within each inner row, producing IDs such as <code>1000-A1</code>, <code>1000-A2</code>, and <code>1000-B1</code>.</li>
           <li>A panel overlapping multiple Rows is assigned to the Row with the greatest overlap.</li>
           <li>Panels outside every edited Row receive <code>row_id: "0000"</code> and IDs such as <code>0000-P000001</code>. The letter <code>P</code> identifies a standalone panel, not an inner panel row.</li>
-          <li>If Build rows is skipped, all valid panels receive the reserved row ID <code>0000</code>.</li>
         </ol>
         <p>Reassigning IDs may change existing panel references. Any finalized anomaly assignment linked to these panels is removed and must be run again.</p>
       </div>
